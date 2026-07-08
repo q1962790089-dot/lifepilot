@@ -6,6 +6,7 @@ export interface LifeRecord {
   category: Category
   createdAt: string
   date: string
+  completed?: boolean
   extracted?: ExtractedData
 }
 
@@ -31,9 +32,9 @@ export interface ExerciseData {
 export type ExtractedData = WeightData | ExpenseData | ExerciseData
 
 export const CATEGORY_LABELS: Record<Category, string> = {
-  journal: '📝 日记',
-  todo: '✅ 待办',
-  weight: '⚖️ 体重',
-  expense: '💰 消费',
-  exercise: '🏃 运动',
+  journal: '日记',
+  todo: '计划',
+  weight: '体重',
+  expense: '消费',
+  exercise: '运动',
 }

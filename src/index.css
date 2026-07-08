@@ -1,11 +1,37 @@
 @import "tailwindcss";
 
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: #eceef2;
+}
+
 body {
   margin: 0;
+  min-width: 320px;
+  background: #eceef2;
+  color: #111827;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+button,
+input {
+  font: inherit;
 }
 
 #root {
   max-width: 430px;
-  margin: 0 auto;
   min-height: 100dvh;
+  margin: 0 auto;
+  background: #f5f5f7;
+  box-shadow: 0 0 0 1px rgb(15 23 42 / 0.04);
 }
