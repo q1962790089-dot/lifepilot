@@ -17,6 +17,16 @@ import { deleteRecord, getTodayRecords, toggleTodoCompleted, updateRecord } from
 import { CATEGORY_LABELS } from '../types/record'
 import type { LifeRecord, Category } from '../types/record'
 
+interface DailySummary {
+  date: string
+  summary: string
+  source: 'ai' | 'fallback'
+  model?: string
+  updatedAt: string
+}
+
+const SUMMARY_STORAGE_KEY = 'lifepilot_daily_summaries'
+
 const SECTIONS: {
   category: Category
   title: string
@@ -26,7 +36,7 @@ const SECTIONS: {
 }[] = [
   {
     category: 'todo',
-    title: '今日计划',
+    title: '待办与计划',
     emptyText: '今日暂无计划，慢慢来就好。',
     icon: CheckCircle2,
     iconClassName: 'bg-blue-50 text-blue-600',
@@ -63,6 +73,10 @@ const SECTIONS: {
 
 const CATEGORY_OPTIONS: Category[] = ['journal', 'todo', 'weight', 'expense', 'exercise']
 
+function todayKey() {
+  return new Date().toISOString().slice(0, 10)
+}
+
 function formatTime(createdAt: string) {
   return new Date(createdAt).toLocaleTimeString([], {
     hour: '2-digit',
@@ -70,18 +84,59 @@ function formatTime(createdAt: string) {
   })
 }
 
+function formatLocalDateKey(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function formatDueDate(dueDate?: string) {
+  if (!dueDate) return null
+
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const todayKey = formatLocalDateKey(new Date())
+  const tomorrowKey = formatLocalDateKey(tomorrow)
+
+  if (dueDate === todayKey) return '今天'
+  if (dueDate === tomorrowKey) return '明天'
+  return dueDate
+}
+
+function loadDailySummaries(): Record<string, DailySummary> {
+  try {
+    const raw = localStorage.getItem(SUMMARY_STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {
+    // Ignore invalid stored summaries and start fresh.
+  }
+  return {}
+}
+
+function getStoredSummary(date: string): DailySummary | null {
+  return loadDailySummaries()[date] ?? null
+}
+
+function saveStoredSummary(summary: DailySummary) {
+  const summaries = loadDailySummaries()
+  summaries[summary.date] = summary
+  localStorage.setItem(SUMMARY_STORAGE_KEY, JSON.stringify(summaries))
+}
+
 function createFallbackSummary(records: LifeRecord[]) {
   if (records.length === 0) {
-    return '今天还没有记录。等你想写的时候，我会帮你安静地整理好。'
+    return '今天还没有足够的记录，晚点再来总结也可以。'
   }
 
-  const todoCount = records.filter((record) => record.category === 'todo').length
-  const doneCount = records.filter((record) => record.category === 'todo' && record.completed).length
   const categories = Array.from(new Set(records.map((record) => CATEGORY_LABELS[record.category])))
+  const todoCount = records.filter((record) => record.category === 'todo').length
+  const completedCount = records.filter((record) => record.category === 'todo' && record.completed).length
 
-  const firstLine = `今天一共记录了 ${records.length} 条，包含${categories.join('、')}。`
-  const todoLine = todoCount > 0 ? `计划完成 ${doneCount}/${todoCount} 条，按自己的节奏推进就好。` : ''
-  return [firstLine, todoLine || '这些片段已经被整理好了，晚点回看会更清楚。'].join('')
+  const categoryText = categories.length > 0 ? `，包括${categories.join('、')}` : ''
+  const todoText = todoCount > 0 ? `计划完成 ${completedCount}/${todoCount} 条。` : ''
+
+  return `今天你记录了 ${records.length} 条内容${categoryText}。记录不多也没关系，已经能看出今天的一些状态。${todoText}晚点可以继续补充，让 LifePilot 更了解你。`
 }
 
 async function requestDailySummary(records: LifeRecord[], fallbackSummary: string) {
@@ -91,7 +146,7 @@ async function requestDailySummary(records: LifeRecord[], fallbackSummary: strin
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      date: new Date().toISOString().slice(0, 10),
+      date: todayKey(),
       records,
       fallbackSummary,
     }),
@@ -108,7 +163,11 @@ async function requestDailySummary(records: LifeRecord[], fallbackSummary: strin
     throw new Error('Summary returned empty text')
   }
 
-  return data.summary.trim()
+  return {
+    summary: data.summary.trim(),
+    source: data.source === 'ai' ? 'ai' : 'fallback',
+    model: typeof data.model === 'string' ? data.model : undefined,
+  } satisfies Pick<DailySummary, 'summary' | 'source' | 'model'>
 }
 
 function RecordEditor({
@@ -162,15 +221,19 @@ function RecordEditor({
   )
 }
 
-function TodayPage() {
+function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
   const [records, setRecords] = useState<LifeRecord[]>([])
   const [editingId, setEditingId] = useState<number | null>(null)
-  const [summary, setSummary] = useState('')
+  const [summary, setSummary] = useState<DailySummary | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
-
-  const refresh = () => setRecords(getTodayRecords())
+  const currentDate = todayKey()
 
   useEffect(() => {
+    const refresh = () => {
+      setRecords(getTodayRecords())
+      setSummary(getStoredSummary(currentDate))
+    }
+
     const handleVisibilityChange = () => {
       if (!document.hidden) refresh()
     }
@@ -183,45 +246,53 @@ function TodayPage() {
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [])
+  }, [currentDate])
 
-  useEffect(() => {
-    let ignored = false
+  const handleGenerateSummary = async () => {
+    if (records.length === 0 || summaryLoading) return
+
+    setSummaryLoading(true)
     const fallbackSummary = createFallbackSummary(records)
 
-    async function loadSummary() {
-      setSummaryLoading(true)
-      setSummary(fallbackSummary)
-
-      try {
-        const nextSummary = await requestDailySummary(records, fallbackSummary)
-        if (!ignored) setSummary(nextSummary)
-      } catch {
-        console.log('[LifePilot] daily summary source:', 'fallback')
-        if (!ignored) setSummary(fallbackSummary)
-      } finally {
-        if (!ignored) setSummaryLoading(false)
+    try {
+      const result = await requestDailySummary(records, fallbackSummary)
+      const nextSummary: DailySummary = {
+        date: currentDate,
+        summary: result.summary,
+        source: result.source,
+        model: result.model,
+        updatedAt: new Date().toISOString(),
       }
+      saveStoredSummary(nextSummary)
+      setSummary(nextSummary)
+    } catch {
+      console.log('[LifePilot] daily summary source:', 'fallback')
+      const fallback: DailySummary = {
+        date: currentDate,
+        summary: fallbackSummary,
+        source: 'fallback',
+        updatedAt: new Date().toISOString(),
+      }
+      saveStoredSummary(fallback)
+      setSummary(fallback)
+    } finally {
+      setSummaryLoading(false)
     }
+  }
 
-    loadSummary()
-
-    return () => {
-      ignored = true
-    }
-  }, [records])
+  const filterToday = (items: LifeRecord[]) => items.filter((record) => record.date === currentDate)
 
   const handleDelete = (id: number) => {
-    setRecords(deleteRecord(id).filter((record) => record.date === new Date().toISOString().slice(0, 10)))
+    setRecords(filterToday(deleteRecord(id)))
   }
 
   const handleToggleTodo = (id: number) => {
-    setRecords(toggleTodoCompleted(id).filter((record) => record.date === new Date().toISOString().slice(0, 10)))
+    setRecords(filterToday(toggleTodoCompleted(id)))
   }
 
   const handleSave = (id: number, text: string, category: Category) => {
     if (!text) return
-    setRecords(updateRecord(id, { text, category }).filter((record) => record.date === new Date().toISOString().slice(0, 10)))
+    setRecords(filterToday(updateRecord(id, { text, category })))
     setEditingId(null)
   }
 
@@ -245,24 +316,17 @@ function TodayPage() {
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-gray-950">{today}</h1>
         <p className="mt-1 text-sm text-gray-500">把今天发生的事，安静地放在这里。</p>
+        {onOpenCharts && (
+          <button
+            onClick={onOpenCharts}
+            className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-black/5"
+          >
+            查看图表
+          </button>
+        )}
       </header>
 
       <div className="space-y-4">
-        <section className="rounded-3xl bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5">
-          <div className="mb-3 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-950 text-white">
-              <Sparkles size={20} strokeWidth={2} />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">今日总结</h2>
-              <p className="text-xs text-gray-400">{summaryLoading ? '正在整理' : '简短回顾'}</p>
-            </div>
-          </div>
-          <p className="rounded-2xl bg-gray-50 px-3 py-3 text-sm leading-relaxed text-gray-600">
-            {summary}
-          </p>
-        </section>
-
         {SECTIONS.map((section) => {
           const items = grouped[section.category] ?? []
           const Icon = section.icon
@@ -314,8 +378,21 @@ function TodayPage() {
                             <p className={`text-sm leading-relaxed text-gray-800 ${record.completed ? 'text-gray-400 line-through' : ''}`}>
                               {record.text}
                             </p>
+                            {record.tags && record.tags.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {record.tags.map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-400 ring-1 ring-black/5"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                             <p className="mt-2 text-xs text-gray-400">
                               {record.category === 'todo' ? (record.completed ? '已完成 · ' : '未完成 · ') : ''}
+                              {record.category === 'todo' && record.dueDate ? `截止 ${formatDueDate(record.dueDate)} · ` : ''}
                               {formatTime(record.createdAt)}
                             </p>
                           </div>
@@ -344,6 +421,48 @@ function TodayPage() {
             </section>
           )
         })}
+
+        <section className="rounded-3xl bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-950 text-white">
+                <Sparkles size={20} strokeWidth={2} />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">今日总结</h2>
+                <p className="text-xs text-gray-400">
+                  {summary ? '已保存' : records.length === 0 ? '稍后再来' : '按需生成'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {records.length === 0 ? (
+            <p className="rounded-2xl bg-gray-50 px-3 py-3 text-sm leading-relaxed text-gray-400">
+              今天还没有足够的记录，晚点再来总结也可以。
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {summary ? (
+                <p className="rounded-2xl bg-gray-50 px-3 py-3 text-sm leading-relaxed text-gray-600">
+                  {summary.summary}
+                </p>
+              ) : (
+                <p className="rounded-2xl bg-gray-50 px-3 py-3 text-sm leading-relaxed text-gray-400">
+                  生成一段简短的今日总结，帮你温和地回看今天。
+                </p>
+              )}
+
+              <button
+                onClick={handleGenerateSummary}
+                disabled={summaryLoading}
+                className="w-full rounded-full bg-gray-950 px-4 py-2.5 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {summaryLoading ? '正在生成...' : summary ? '重新生成' : '生成今日总结'}
+              </button>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   )

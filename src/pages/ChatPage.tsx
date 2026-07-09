@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { MessageCircle, SendHorizontal, Sparkles } from 'lucide-react'
 import { recognize } from '../utils/recognize'
-import { addRecord, getTodayRecords } from '../utils/storage'
+import { inferTodoDueDate } from '../utils/dueDate'
+import { addRecord, getTodayRecords, loadRecords } from '../utils/storage'
+import { generateTags } from '../utils/tags'
 import type { Category } from '../types/record'
 
 type Intent = 'record' | 'chat' | 'question'
@@ -165,12 +167,46 @@ function createFallbackReply(intent: Intent, categories: Category[], seed: numbe
   return replies[seed % replies.length]
 }
 
+function getRecentOverview() {
+  const start = new Date()
+  start.setDate(start.getDate() - 6)
+  start.setHours(0, 0, 0, 0)
+
+  const recentRecords = loadRecords()
+    .filter((record) => new Date(`${record.date}T00:00:00`) >= start)
+    .slice(-30)
+  const tagCounts = recentRecords
+    .flatMap((record) => record.tags ?? [])
+    .reduce<Record<string, number>>((acc, tag) => {
+      acc[tag] = (acc[tag] ?? 0) + 1
+      return acc
+    }, {})
+  const topTags = Object.entries(tagCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([tag]) => tag)
+
+  return {
+    days: 7,
+    recordCount: recentRecords.length,
+    topTags,
+    records: recentRecords.slice(-8).map((record) => ({
+      text: record.text,
+      category: record.category,
+      tags: record.tags ?? [],
+      date: record.date,
+      dueDate: record.dueDate,
+    })),
+  }
+}
+
 async function requestAiReply({
   text,
   category,
   intent,
   categories,
   todayRecords,
+  recentOverview,
   messages,
   fallbackReply,
 }: {
@@ -179,6 +215,7 @@ async function requestAiReply({
   intent: Intent
   categories: Category[]
   todayRecords: ReturnType<typeof getTodayRecords>
+  recentOverview: ReturnType<typeof getRecentOverview>
   messages: Message[]
   fallbackReply: string
 }) {
@@ -193,6 +230,7 @@ async function requestAiReply({
       intent,
       categories,
       todayRecords,
+      recentOverview,
       messages,
       fallbackReply,
     }),
@@ -220,7 +258,7 @@ function ChatPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, sending])
 
   const sendMessage = async () => {
     const text = input.trim()
@@ -231,6 +269,7 @@ function ChatPage() {
     const intent = getIntent(text)
     const replyCategories = getReplyCategories(text)
     const recentMessages = messages.slice(-6)
+    const dueDate = category === 'todo' ? inferTodoDueDate(text) : undefined
 
     addRecord({
       id: now.getTime(),
@@ -238,6 +277,8 @@ function ChatPage() {
       category,
       createdAt: now.toISOString(),
       date: now.toISOString().slice(0, 10),
+      ...(dueDate ? { dueDate } : {}),
+      tags: generateTags(text, category),
     })
 
     const userMsg: Message = {
@@ -263,6 +304,7 @@ function ChatPage() {
         intent,
         categories: replyCategories,
         todayRecords: getTodayRecords(),
+        recentOverview: getRecentOverview(),
         messages: recentMessages,
         fallbackReply,
       })
@@ -343,11 +385,25 @@ function ChatPage() {
               </div>
             </div>
           ))}
+          {sending && (
+            <div className="flex justify-start">
+              <div className="rounded-3xl rounded-bl-lg bg-white px-4 py-3 text-sm leading-relaxed text-gray-500 shadow-sm ring-1 ring-black/5">
+                <div className="flex items-center gap-2">
+                  <span>正在思考</span>
+                  <span className="flex items-center gap-1" aria-hidden="true">
+                    <span className="h-1.5 w-1.5 rounded-full bg-gray-300 animate-bounce" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-gray-300 animate-bounce [animation-delay:120ms]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-gray-300 animate-bounce [animation-delay:240ms]" />
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         <div ref={bottomRef} />
       </div>
 
-      <div className="shrink-0 px-4 pb-4 pt-2">
+      <div className="shrink-0 px-4 pb-7 pt-2">
         <div className="flex items-center gap-2 rounded-full bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5">
           <input
             type="text"

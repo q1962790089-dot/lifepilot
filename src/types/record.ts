@@ -6,6 +6,8 @@ export interface LifeRecord {
   category: Category
   createdAt: string
   date: string
+  dueDate?: string
+  tags?: string[]
   completed?: boolean
   extracted?: ExtractedData
 }

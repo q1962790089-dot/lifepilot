@@ -6,6 +6,7 @@ import ChatPage from './pages/ChatPage'
 import TimelinePage from './pages/TimelinePage'
 
 type Tab = 'today' | 'chat' | 'timeline'
+type TimelineView = 'list' | 'charts'
 
 const TABS: { key: Tab; label: string; icon: LucideIcon }[] = [
   { key: 'today', label: '今日', icon: CalendarDays },
@@ -15,15 +16,21 @@ const TABS: { key: Tab; label: string; icon: LucideIcon }[] = [
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('chat')
+  const [timelineView, setTimelineView] = useState<TimelineView>('list')
+
+  const openCharts = () => {
+    setTimelineView('charts')
+    setActiveTab('timeline')
+  }
 
   const renderPage = () => {
     switch (activeTab) {
       case 'today':
-        return <TodayPage />
+        return <TodayPage onOpenCharts={openCharts} />
       case 'chat':
         return <ChatPage />
       case 'timeline':
-        return <TimelinePage />
+        return <TimelinePage initialView={timelineView} onViewChange={setTimelineView} />
     }
   }
 

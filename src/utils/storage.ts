@@ -1,16 +1,29 @@
 import type { Category, LifeRecord } from '../types/record'
+import { inferTodoDueDate } from './dueDate'
+import { generateTags } from './tags'
 
 const RECORDS_KEY = 'lifepilot_records'
 
 function normalizeRecord(record: LifeRecord): LifeRecord {
+  const base = {
+    ...record,
+    tags: Array.isArray(record.tags) ? record.tags : generateTags(record.text, record.category),
+  }
+
   if (record.category === 'todo') {
+    const dueDate = typeof record.dueDate === 'string' && record.dueDate
+      ? record.dueDate
+      : inferTodoDueDate(record.text)
+    const { dueDate: _dueDate, ...todoBase } = base
+
     return {
-      ...record,
+      ...todoBase,
       completed: Boolean(record.completed),
+      ...(dueDate ? { dueDate } : {}),
     }
   }
 
-  const { completed: _completed, ...rest } = record
+  const { completed: _completed, dueDate: _dueDate, ...rest } = base
   return rest
 }
 
@@ -30,14 +43,17 @@ export function saveRecords(records: LifeRecord[]) {
 
 export function addRecord(record: LifeRecord): LifeRecord[] {
   const records = loadRecords()
-  records.push(normalizeRecord(record))
+  records.push(normalizeRecord({
+    ...record,
+    tags: record.tags ?? generateTags(record.text, record.category),
+  }))
   saveRecords(records)
   return records
 }
 
 export function updateRecord(
   id: number,
-  updates: Partial<Pick<LifeRecord, 'text' | 'category' | 'completed'>>,
+  updates: Partial<Pick<LifeRecord, 'text' | 'category' | 'completed' | 'dueDate'>>,
 ): LifeRecord[] {
   const records = loadRecords().map((record) => {
     if (record.id !== id) return record
@@ -49,8 +65,16 @@ export function updateRecord(
       category: nextCategory as Category,
     }
 
+    if (updates.text !== undefined || updates.category !== undefined) {
+      nextRecord.tags = generateTags(nextRecord.text, nextRecord.category)
+    }
+
     if (nextCategory === 'todo' && typeof nextRecord.completed !== 'boolean') {
       nextRecord.completed = false
+    }
+
+    if (nextCategory === 'todo' && (updates.text !== undefined || updates.category !== undefined || updates.dueDate !== undefined)) {
+      nextRecord.dueDate = updates.dueDate ?? inferTodoDueDate(nextRecord.text)
     }
 
     return normalizeRecord(nextRecord)
