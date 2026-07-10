@@ -55,6 +55,11 @@ function normalizePreferences(preferences) {
     'health_exercise',
     'expense_tracking',
   ]
+  const personalityGroups = ['analyst', 'diplomat', 'sentinel', 'explorer']
+  const experienceModes = ['planner', 'companion', 'observer', 'flexible']
+  const summaryStyles = ['concrete', 'pattern']
+  const homePriorities = ['plans', 'chat', 'insights', 'quickCapture']
+  const themeAccents = ['purple', 'green', 'blue', 'amber']
 
   return {
     persona: includes(input.persona, ['clear', 'gentle', 'intimate'], 'gentle'),
@@ -65,6 +70,18 @@ function normalizePreferences(preferences) {
     emojiUsage: includes(input.emojiUsage, ['none', 'occasional'], 'none'),
     focusAreas: Array.isArray(input.focusAreas)
       ? input.focusAreas.filter((area) => focusAreas.includes(area)).slice(0, 6)
+      : [],
+    selfReportedPersonalityType: typeof input.selfReportedPersonalityType === 'string'
+      ? input.selfReportedPersonalityType.trim().toUpperCase().slice(0, 4)
+      : undefined,
+    personalityGroup: includes(input.personalityGroup, personalityGroups, undefined),
+    personalityRecommendationAccepted: Boolean(input.personalityRecommendationAccepted),
+    experienceMode: includes(input.experienceMode, experienceModes, 'flexible'),
+    summaryStyle: includes(input.summaryStyle, summaryStyles, 'concrete'),
+    homePriority: includes(input.homePriority, homePriorities, 'quickCapture'),
+    themeAccent: includes(input.themeAccent, themeAccents, 'purple'),
+    manualOverrides: Array.isArray(input.manualOverrides)
+      ? input.manualOverrides.filter((item) => typeof item === 'string').slice(0, 20)
       : [],
   }
 }
@@ -110,6 +127,16 @@ function getChatSystemPrompt(rawPreferences) {
     preferences.focusAreas.length > 0
       ? `用户主要关注：${preferences.focusAreas.join('、')}。这些只用于理解优先级，不要逐字复述。`
       : '用户尚未选择主要关注方向，不要假设具体偏好。',
+    preferences.experienceMode === 'planner'
+      ? '体验模式：planner。回复可以更重视计划、待办、下一步和执行顺序。'
+      : preferences.experienceMode === 'companion'
+        ? '体验模式：companion。回复可以更重视陪伴、生活记录和情绪承接。'
+        : preferences.experienceMode === 'observer'
+          ? '体验模式：observer。回复可以更重视观察规律、总结和状态变化，但不要频繁反问。'
+          : '体验模式：flexible。回复保持灵活、轻量、少约束，方便用户快速记录。',
+    preferences.summaryStyle === 'pattern'
+      ? '总结倾向：更关注趋势、关联和重复主题，但不能编造记录中没有的信息。'
+      : '总结倾向：更关注实际记录、事实和具体事项。',
     preferences.replyLength === 'short'
       ? '回复长度：简短，通常 1 句话，最多 2 句话。'
       : '回复长度：适中，通常 1-3 句话；用户情绪不好时可以稍微多一点，但不要超过 5 句话。',

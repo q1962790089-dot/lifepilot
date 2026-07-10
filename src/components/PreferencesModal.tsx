@@ -1,6 +1,13 @@
 import { X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { Address, EmojiUsage, Initiative, LifePilotPreferences, Persona, ReplyLength } from '../types/preferences'
+import {
+  applyPersonalityRecommendation,
+  clearPersonalityRecommendation,
+  createPersonalityRecommendation,
+  markManualOverride,
+  PERSONALITY_GROUPS,
+} from '../utils/personalityRecommendation'
 import { getAddressText, loadPreferences, resetPreferences, savePreferences } from '../utils/preferences'
 
 interface PreferencesModalProps {
@@ -35,6 +42,20 @@ const EMOJI_OPTIONS: { value: EmojiUsage; label: string }[] = [
   { value: 'none', label: '不使用' },
   { value: 'occasional', label: '偶尔使用' },
 ]
+
+const EXPERIENCE_MODE_LABELS: Record<LifePilotPreferences['experienceMode'], string> = {
+  planner: '计划优先',
+  companion: '陪伴记录',
+  observer: '观察总结',
+  flexible: '灵活记录',
+}
+
+const ACCENT_CLASS = {
+  purple: 'bg-violet-50 text-violet-700 ring-violet-100',
+  green: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+  blue: 'bg-blue-50 text-blue-700 ring-blue-100',
+  amber: 'bg-amber-50 text-amber-700 ring-amber-100',
+}
 
 function previewFor(preferences: LifePilotPreferences) {
   if (preferences.persona === 'clear') {
@@ -121,13 +142,19 @@ function InlineOptions<T extends string>({
 function PreferencesModal({ open, onClose }: PreferencesModalProps) {
   const [draft, setDraft] = useState<LifePilotPreferences>(() => loadPreferences())
   const [savedMessage, setSavedMessage] = useState('')
+  const [showPersonalityPicker, setShowPersonalityPicker] = useState(false)
+  const [selectedPersonalityType, setSelectedPersonalityType] = useState('')
   const preview = useMemo(() => previewFor(draft), [draft])
+  const personalityRecommendation = useMemo(
+    () => selectedPersonalityType ? createPersonalityRecommendation(selectedPersonalityType) : null,
+    [selectedPersonalityType],
+  )
 
   if (!open) return null
 
   const update = <Key extends keyof LifePilotPreferences>(key: Key, value: LifePilotPreferences[Key]) => {
     setSavedMessage('')
-    setDraft((current) => ({ ...current, [key]: value }))
+    setDraft((current) => markManualOverride({ ...current, [key]: value }, key))
   }
 
   const handleSave = () => {
@@ -138,7 +165,23 @@ function PreferencesModal({ open, onClose }: PreferencesModalProps) {
   const handleReset = () => {
     const defaults = resetPreferences()
     setDraft(defaults)
+    setSelectedPersonalityType('')
+    setShowPersonalityPicker(false)
     setSavedMessage('已恢复默认设置，下一条回复开始生效。')
+  }
+
+  const handleClearPersonality = () => {
+    setDraft((current) => clearPersonalityRecommendation(current))
+    setSelectedPersonalityType('')
+    setShowPersonalityPicker(false)
+    setSavedMessage('已清除人格偏好，历史记录不会受影响。')
+  }
+
+  const handleUsePersonalityRecommendation = () => {
+    if (!personalityRecommendation) return
+    setDraft((current) => applyPersonalityRecommendation(current, personalityRecommendation))
+    setShowPersonalityPicker(false)
+    setSavedMessage('已应用推荐，仍然可以继续手动调整。')
   }
 
   return (
@@ -202,6 +245,96 @@ function PreferencesModal({ open, onClose }: PreferencesModalProps) {
             value={draft.emojiUsage}
             onChange={(value) => update('emojiUsage', value)}
           />
+
+          <section className="rounded-3xl bg-gray-50 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">人格偏好</h3>
+                <p className="mt-1 text-xs leading-relaxed text-gray-400">
+                  人格偏好只影响推荐，不会删除或改变你的历史记录。
+                </p>
+              </div>
+              {draft.personalityGroup && (
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${ACCENT_CLASS[draft.themeAccent]}`}>
+                  {draft.selfReportedPersonalityType}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500">
+              <div className="rounded-2xl bg-white px-3 py-2 ring-1 ring-black/5">
+                当前类型：{draft.selfReportedPersonalityType ?? '未设置'}
+              </div>
+              <div className="rounded-2xl bg-white px-3 py-2 ring-1 ring-black/5">
+                推荐模式：{EXPERIENCE_MODE_LABELS[draft.experienceMode]}
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => setShowPersonalityPicker((value) => !value)}
+                className="rounded-full bg-white px-3 py-2 text-xs font-medium text-gray-600 ring-1 ring-black/5"
+              >
+                {draft.selfReportedPersonalityType ? '修改类型' : '重新获取推荐'}
+              </button>
+              <button
+                onClick={() => setShowPersonalityPicker(true)}
+                className="rounded-full bg-white px-3 py-2 text-xs font-medium text-gray-600 ring-1 ring-black/5"
+              >
+                重新获取推荐
+              </button>
+              <button
+                onClick={handleClearPersonality}
+                className="rounded-full bg-white px-3 py-2 text-xs font-medium text-gray-400 ring-1 ring-black/5"
+              >
+                清除人格信息
+              </button>
+            </div>
+
+            {showPersonalityPicker && (
+              <div className="mt-3 space-y-3">
+                {Object.entries(PERSONALITY_GROUPS).map(([group, meta]) => (
+                  <div key={group}>
+                    <span className={`mb-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${ACCENT_CLASS[meta.accent]}`}>
+                      {meta.label}
+                    </span>
+                    <div className="grid grid-cols-4 gap-2">
+                      {meta.types.map((type) => (
+                        <button
+                          key={type}
+                          onClick={() => setSelectedPersonalityType(type)}
+                          className={`rounded-2xl px-2 py-2 text-xs font-semibold ring-1 ${
+                            selectedPersonalityType === type
+                              ? 'bg-gray-950 text-white ring-gray-950'
+                              : 'bg-white text-gray-500 ring-black/5'
+                          }`}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {personalityRecommendation && (
+                  <div className={`rounded-3xl p-3 ring-1 ${ACCENT_CLASS[personalityRecommendation.themeAccent]}`}>
+                    <p className="text-sm font-semibold">{personalityRecommendation.title}</p>
+                    <div className="mt-2 space-y-1">
+                      {personalityRecommendation.bullets.map((item) => (
+                        <p key={item} className="text-xs">{item}</p>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleUsePersonalityRecommendation}
+                      className="mt-3 w-full rounded-full bg-gray-950 px-3 py-2 text-xs font-medium text-white"
+                    >
+                      使用推荐
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
 
           <section className="rounded-3xl bg-gray-50 p-3">
             <p className="text-xs font-medium text-gray-400">预览：“今天有点累。”</p>

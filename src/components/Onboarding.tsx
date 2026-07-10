@@ -1,6 +1,12 @@
 import { Check, ChevronRight, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import type { Address, FocusArea, LifePilotPreferences, Persona, ReplyLength, Initiative } from '../types/preferences'
+import type { Address, FocusArea, Initiative, LifePilotPreferences, Persona, ReplyLength } from '../types/preferences'
+import {
+  applyPersonalityRecommendation,
+  createPersonalityRecommendation,
+  markManualOverride,
+  PERSONALITY_GROUPS,
+} from '../utils/personalityRecommendation'
 import { completeOnboarding, DEFAULT_PREFERENCES, getAddressText } from '../utils/preferences'
 
 interface OnboardingProps {
@@ -54,6 +60,13 @@ const INITIATIVE_OPTIONS: { value: Initiative; label: string }[] = [
   { value: 'medium', label: '适度提醒' },
 ]
 
+const ACCENT_CLASS = {
+  purple: 'bg-violet-50 text-violet-700 ring-violet-100',
+  green: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+  blue: 'bg-blue-50 text-blue-700 ring-blue-100',
+  amber: 'bg-amber-50 text-amber-700 ring-amber-100',
+}
+
 function previewFor(preferences: LifePilotPreferences) {
   if (preferences.persona === 'clear') return PERSONA_OPTIONS[0].preview
   if (preferences.persona === 'gentle') return PERSONA_OPTIONS[1].preview
@@ -61,18 +74,18 @@ function previewFor(preferences: LifePilotPreferences) {
   return `${address ? `辛苦啦，${address}。` : '辛苦啦。'}我帮你记下来了，今晚先别给自己安排太多事情。`
 }
 
-function Chip<T extends string>({
+function Chip({
   label,
   active,
   onClick,
 }: {
   label: string
   active: boolean
-  onClick: (value?: T) => void
+  onClick: () => void
 }) {
   return (
     <button
-      onClick={() => onClick()}
+      onClick={onClick}
       className={`rounded-full px-3 py-2 text-sm font-medium transition-colors ${
         active ? 'bg-gray-950 text-white' : 'bg-gray-50 text-gray-500 ring-1 ring-black/5'
       }`}
@@ -85,19 +98,24 @@ function Chip<T extends string>({
 function Onboarding({ onComplete }: OnboardingProps) {
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState<LifePilotPreferences>(DEFAULT_PREFERENCES)
+  const [selectedType, setSelectedType] = useState('')
+  const recommendation = useMemo(
+    () => selectedType ? createPersonalityRecommendation(selectedType) : null,
+    [selectedType],
+  )
   const preview = useMemo(() => previewFor(draft), [draft])
 
   const update = <Key extends keyof LifePilotPreferences>(key: Key, value: LifePilotPreferences[Key]) => {
-    setDraft((current) => ({ ...current, [key]: value }))
+    setDraft((current) => markManualOverride({ ...current, [key]: value }, key))
   }
 
   const toggleFocusArea = (area: FocusArea) => {
-    setDraft((current) => ({
+    setDraft((current) => markManualOverride({
       ...current,
       focusAreas: current.focusAreas.includes(area)
         ? current.focusAreas.filter((item) => item !== area)
         : [...current.focusAreas, area],
-    }))
+    }, 'focusAreas'))
   }
 
   const finish = (preferences = draft) => {
@@ -105,8 +123,23 @@ function Onboarding({ onComplete }: OnboardingProps) {
     onComplete()
   }
 
-  const skip = () => {
+  const skipAll = () => {
     finish(DEFAULT_PREFERENCES)
+  }
+
+  const skipPersonality = () => {
+    setSelectedType('')
+    setStep(2)
+  }
+
+  const useRecommendation = () => {
+    if (!recommendation) return
+    setDraft((current) => applyPersonalityRecommendation(current, recommendation))
+    setStep(2)
+  }
+
+  const adjustManually = () => {
+    setStep(2)
   }
 
   return (
@@ -122,13 +155,13 @@ function Onboarding({ onComplete }: OnboardingProps) {
               <h1 className="text-xl font-semibold tracking-tight">让 AI 更像适合你的管家</h1>
             </div>
           </div>
-          <button onClick={skip} className="shrink-0 text-xs font-medium text-gray-400">
+          <button onClick={skipAll} className="shrink-0 text-xs font-medium text-gray-400">
             暂时跳过
           </button>
         </div>
 
         <div className="mb-5 flex gap-2">
-          {[0, 1, 2].map((index) => (
+          {[0, 1, 2, 3, 4].map((index) => (
             <div
               key={index}
               className={`h-1.5 flex-1 rounded-full ${index <= step ? 'bg-gray-950' : 'bg-gray-100'}`}
@@ -137,6 +170,89 @@ function Onboarding({ onComplete }: OnboardingProps) {
         </div>
 
         {step === 0 && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-base font-semibold">你熟悉自己的16型人格吗？</h2>
+              <p className="mt-1 text-sm leading-relaxed text-gray-400">
+                它只用于推荐初始体验，不会定义你，也可以随时修改。
+              </p>
+            </div>
+
+            {Object.entries(PERSONALITY_GROUPS).map(([group, meta]) => (
+              <section key={group}>
+                <div className={`mb-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${ACCENT_CLASS[meta.accent]}`}>
+                  {meta.label}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {meta.types.map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => {
+                        setSelectedType(type)
+                        setStep(1)
+                      }}
+                      className="rounded-2xl bg-gray-50 px-2 py-2 text-sm font-semibold text-gray-600 ring-1 ring-black/5"
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={skipPersonality}
+                className="rounded-full bg-gray-50 px-4 py-3 text-sm font-medium text-gray-500 ring-1 ring-black/5"
+              >
+                我不知道
+              </button>
+              <button
+                onClick={skipPersonality}
+                className="rounded-full bg-gray-50 px-4 py-3 text-sm font-medium text-gray-500 ring-1 ring-black/5"
+              >
+                暂时跳过
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 1 && recommendation && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-base font-semibold">根据你的选择，我们先为你推荐：</h2>
+              <p className="mt-1 text-sm text-gray-400">这只是初始推荐，后面可以随时覆盖。</p>
+            </div>
+            <section className={`rounded-3xl p-4 ring-1 ${ACCENT_CLASS[recommendation.themeAccent]}`}>
+              <p className="text-xs font-medium opacity-70">{recommendation.type}</p>
+              <h3 className="mt-1 text-lg font-semibold">{recommendation.title}</h3>
+              <div className="mt-3 space-y-2">
+                {recommendation.bullets.map((item) => (
+                  <p key={item} className="flex items-center gap-2 text-sm">
+                    <Check size={15} />
+                    {item}
+                  </p>
+                ))}
+              </div>
+            </section>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={adjustManually}
+                className="rounded-full bg-gray-50 px-4 py-3 text-sm font-medium text-gray-500 ring-1 ring-black/5"
+              >
+                自己调整
+              </button>
+              <button
+                onClick={useRecommendation}
+                className="rounded-full bg-gray-950 px-4 py-3 text-sm font-medium text-white"
+              >
+                使用推荐
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
           <div className="space-y-3">
             <div>
               <h2 className="text-base font-semibold">第一步：选择 AI 风格</h2>
@@ -169,7 +285,7 @@ function Onboarding({ onComplete }: OnboardingProps) {
           </div>
         )}
 
-        {step === 1 && (
+        {step === 3 && (
           <div className="space-y-4">
             <div>
               <h2 className="text-base font-semibold">第二步：选择主要需求</h2>
@@ -188,7 +304,7 @@ function Onboarding({ onComplete }: OnboardingProps) {
           </div>
         )}
 
-        {step === 2 && (
+        {step === 4 && (
           <div className="space-y-5">
             <div>
               <h2 className="text-base font-semibold">第三步：交流细节</h2>
@@ -252,34 +368,34 @@ function Onboarding({ onComplete }: OnboardingProps) {
           </div>
         )}
 
-        <div className="mt-6 flex items-center gap-2">
-          {step > 0 && (
+        {step >= 2 && (
+          <div className="mt-6 flex items-center gap-2">
             <button
-              onClick={() => setStep((current) => current - 1)}
+              onClick={() => setStep((current) => Math.max(0, current - 1))}
               className="rounded-full bg-gray-50 px-4 py-3 text-sm font-medium text-gray-500 ring-1 ring-black/5"
             >
               上一步
             </button>
-          )}
-          {step < 2 ? (
-            <button
-              onClick={() => setStep((current) => current + 1)}
-              className="flex flex-1 items-center justify-center gap-2 rounded-full bg-gray-950 px-4 py-3 text-sm font-medium text-white"
-            >
-              下一步
-              <ChevronRight size={16} />
-            </button>
-          ) : (
-            <button
-              onClick={() => finish()}
-              className="flex-1 rounded-full bg-gray-950 px-4 py-3 text-sm font-medium text-white"
-            >
-              开始记录
-            </button>
-          )}
-        </div>
+            {step < 4 ? (
+              <button
+                onClick={() => setStep((current) => current + 1)}
+                className="flex flex-1 items-center justify-center gap-2 rounded-full bg-gray-950 px-4 py-3 text-sm font-medium text-white"
+              >
+                下一步
+                <ChevronRight size={16} />
+              </button>
+            ) : (
+              <button
+                onClick={() => finish()}
+                className="flex-1 rounded-full bg-gray-950 px-4 py-3 text-sm font-medium text-white"
+              >
+                开始记录
+              </button>
+            )}
+          </div>
+        )}
 
-        {step === 2 && (
+        {step === 4 && (
           <p className="mt-4 text-center text-sm font-medium text-gray-500">你的 LifePilot 已准备好</p>
         )}
       </div>

@@ -15,9 +15,11 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import PreferencesModal from '../components/PreferencesModal'
+import { loadPreferences } from '../utils/preferences'
 import { deleteRecord, getTodayRecords, toggleTodoCompleted, updateRecord } from '../utils/storage'
 import { CATEGORY_LABELS } from '../types/record'
 import type { LifeRecord, Category } from '../types/record'
+import type { LifePilotPreferences } from '../types/preferences'
 
 interface DailySummary {
   date: string
@@ -29,13 +31,15 @@ interface DailySummary {
 
 const SUMMARY_STORAGE_KEY = 'lifepilot_daily_summaries'
 
-const SECTIONS: {
+type TodaySection = {
   category: Category
   title: string
   emptyText: string
   icon: LucideIcon
   iconClassName: string
-}[] = [
+}
+
+const SECTIONS: TodaySection[] = [
   {
     category: 'todo',
     title: '待办与计划',
@@ -74,6 +78,27 @@ const SECTIONS: {
 ]
 
 const CATEGORY_OPTIONS: Category[] = ['journal', 'todo', 'weight', 'expense', 'exercise']
+
+function orderSections(sections: TodaySection[], preferences: LifePilotPreferences) {
+  const priorityByMode: Record<LifePilotPreferences['experienceMode'], Category[]> = {
+    planner: ['todo', 'journal', 'expense', 'exercise', 'weight'],
+    companion: ['journal', 'todo', 'exercise', 'weight', 'expense'],
+    observer: ['journal', 'exercise', 'weight', 'expense', 'todo'],
+    flexible: ['journal', 'todo', 'expense', 'exercise', 'weight'],
+  }
+  const priorityByHome: Partial<Record<LifePilotPreferences['homePriority'], Category[]>> = {
+    plans: ['todo'],
+    chat: ['journal'],
+    insights: ['journal', 'exercise', 'weight'],
+    quickCapture: ['journal', 'todo'],
+  }
+  const priority = [
+    ...(priorityByHome[preferences.homePriority] ?? []),
+    ...priorityByMode[preferences.experienceMode],
+  ]
+
+  return [...sections].sort((a, b) => priority.indexOf(a.category) - priority.indexOf(b.category))
+}
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10)
@@ -303,6 +328,8 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
     ;(acc[record.category] ??= []).push(record)
     return acc
   }, {})
+  const preferences = loadPreferences()
+  const sections = orderSections(SECTIONS, preferences)
 
   const today = new Date().toLocaleDateString('zh-CN', {
     month: 'long',
@@ -339,7 +366,7 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
       </header>
 
       <div className="space-y-4">
-        {SECTIONS.map((section) => {
+        {sections.map((section) => {
           const items = grouped[section.category] ?? []
           const Icon = section.icon
 

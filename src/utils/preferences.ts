@@ -11,6 +11,12 @@ export const DEFAULT_PREFERENCES: LifePilotPreferences = {
   initiative: 'low',
   emojiUsage: 'none',
   focusAreas: [],
+  personalityRecommendationAccepted: false,
+  experienceMode: 'flexible',
+  summaryStyle: 'concrete',
+  homePriority: 'quickCapture',
+  themeAccent: 'purple',
+  manualOverrides: [],
 }
 
 const PERSONAS = ['clear', 'gentle', 'intimate']
@@ -18,6 +24,11 @@ const ADDRESSES = ['你', '名字', '宝宝', 'custom']
 const REPLY_LENGTHS = ['short', 'normal']
 const INITIATIVES = ['low', 'medium']
 const EMOJI_USAGES = ['none', 'occasional']
+const PERSONALITY_GROUPS = ['analyst', 'diplomat', 'sentinel', 'explorer']
+const EXPERIENCE_MODES = ['planner', 'companion', 'observer', 'flexible']
+const SUMMARY_STYLES = ['concrete', 'pattern']
+const HOME_PRIORITIES = ['plans', 'chat', 'insights', 'quickCapture']
+const THEME_ACCENTS = ['purple', 'green', 'blue', 'amber']
 const FOCUS_AREAS = [
   'record_life',
   'plan_tasks',
@@ -45,6 +56,20 @@ export function normalizePreferences(value: unknown): LifePilotPreferences {
     emojiUsage: isOneOf(input.emojiUsage, EMOJI_USAGES) ? input.emojiUsage : DEFAULT_PREFERENCES.emojiUsage,
     focusAreas: Array.isArray(input.focusAreas)
       ? input.focusAreas.filter((area): area is LifePilotPreferences['focusAreas'][number] => isOneOf(area, FOCUS_AREAS))
+      : [],
+    selfReportedPersonalityType: typeof input.selfReportedPersonalityType === 'string'
+      ? input.selfReportedPersonalityType
+      : undefined,
+    personalityGroup: isOneOf(input.personalityGroup, PERSONALITY_GROUPS) ? input.personalityGroup : undefined,
+    personalityRecommendationAccepted: Boolean(input.personalityRecommendationAccepted),
+    experienceMode: isOneOf(input.experienceMode, EXPERIENCE_MODES)
+      ? input.experienceMode
+      : DEFAULT_PREFERENCES.experienceMode,
+    summaryStyle: isOneOf(input.summaryStyle, SUMMARY_STYLES) ? input.summaryStyle : DEFAULT_PREFERENCES.summaryStyle,
+    homePriority: isOneOf(input.homePriority, HOME_PRIORITIES) ? input.homePriority : DEFAULT_PREFERENCES.homePriority,
+    themeAccent: isOneOf(input.themeAccent, THEME_ACCENTS) ? input.themeAccent : DEFAULT_PREFERENCES.themeAccent,
+    manualOverrides: Array.isArray(input.manualOverrides)
+      ? input.manualOverrides.filter((item): item is string => typeof item === 'string')
       : [],
   }
 }
