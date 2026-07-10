@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { CalendarDays, History, MessageCircle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import Onboarding from './components/Onboarding'
 import TodayPage from './pages/TodayPage'
 import ChatPage from './pages/ChatPage'
 import TimelinePage from './pages/TimelinePage'
+import { shouldShowOnboarding } from './utils/preferences'
 
 type Tab = 'today' | 'chat' | 'timeline'
 type TimelineView = 'list' | 'charts'
@@ -17,6 +19,7 @@ const TABS: { key: Tab; label: string; icon: LucideIcon }[] = [
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('chat')
   const [timelineView, setTimelineView] = useState<TimelineView>('list')
+  const [showOnboarding, setShowOnboarding] = useState(() => shouldShowOnboarding())
 
   const openCharts = () => {
     setTimelineView('charts')
@@ -36,6 +39,10 @@ function App() {
 
   return (
     <div className="flex h-dvh flex-col bg-[#f5f5f7] text-gray-950">
+      {showOnboarding ? (
+        <Onboarding onComplete={() => setShowOnboarding(false)} />
+      ) : (
+        <>
       <main className="flex-1 overflow-y-auto">
         {renderPage()}
       </main>
@@ -63,6 +70,8 @@ function App() {
           })}
         </div>
       </nav>
+        </>
+      )}
     </div>
   )
 }

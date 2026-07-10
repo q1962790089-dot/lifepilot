@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { Address, EmojiUsage, Initiative, LifePilotPreferences, Persona, ReplyLength } from '../types/preferences'
-import { getAddressText, loadPreferences, savePreferences } from '../utils/preferences'
+import { getAddressText, loadPreferences, resetPreferences, savePreferences } from '../utils/preferences'
 
 interface PreferencesModalProps {
   open: boolean
@@ -45,8 +45,8 @@ function previewFor(preferences: LifePilotPreferences) {
     return '听起来今天消耗有点大，我帮你记下来了。今晚先让自己轻松一点。'
   }
 
-  const address = getAddressText(preferences) || '宝宝'
-  return `辛苦啦，${address}。我帮你记下来了，今晚先别给自己安排太多事情。`
+  const address = getAddressText(preferences)
+  return `${address ? `辛苦啦，${address}。` : '辛苦啦。'}我帮你记下来了，今晚先别给自己安排太多事情。`
 }
 
 function OptionGroup<T extends string>({
@@ -120,17 +120,25 @@ function InlineOptions<T extends string>({
 
 function PreferencesModal({ open, onClose }: PreferencesModalProps) {
   const [draft, setDraft] = useState<LifePilotPreferences>(() => loadPreferences())
+  const [savedMessage, setSavedMessage] = useState('')
   const preview = useMemo(() => previewFor(draft), [draft])
 
   if (!open) return null
 
   const update = <Key extends keyof LifePilotPreferences>(key: Key, value: LifePilotPreferences[Key]) => {
+    setSavedMessage('')
     setDraft((current) => ({ ...current, [key]: value }))
   }
 
   const handleSave = () => {
     savePreferences(draft)
-    onClose()
+    setSavedMessage('已保存，下一条回复开始生效。')
+  }
+
+  const handleReset = () => {
+    const defaults = resetPreferences()
+    setDraft(defaults)
+    setSavedMessage('已恢复默认设置，下一条回复开始生效。')
   }
 
   return (
@@ -165,11 +173,11 @@ function PreferencesModal({ open, onClose }: PreferencesModalProps) {
             onChange={(value) => update('address', value)}
           />
 
-          {(draft.address === '名字' || draft.address === 'custom') && (
+          {draft.address === 'custom' && (
             <input
               value={draft.customAddress}
               onChange={(event) => update('customAddress', event.target.value)}
-              placeholder={draft.address === '名字' ? '输入你的名字' : '输入你想让 LifePilot 使用的称呼'}
+              placeholder="输入你想让 LifePilot 使用的称呼"
               className="w-full rounded-2xl border border-black/5 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-gray-200"
             />
           )}
@@ -201,9 +209,22 @@ function PreferencesModal({ open, onClose }: PreferencesModalProps) {
           </section>
         </div>
 
+        {savedMessage && (
+          <p className="mt-4 rounded-2xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {savedMessage}
+          </p>
+        )}
+
+        <button
+          onClick={handleReset}
+          className="mt-5 w-full rounded-full bg-gray-50 px-4 py-3 text-sm font-medium text-gray-500 ring-1 ring-black/5"
+        >
+          恢复默认设置
+        </button>
+
         <button
           onClick={handleSave}
-          className="mt-5 w-full rounded-full bg-gray-950 px-4 py-3 text-sm font-medium text-white"
+          className="mt-2 w-full rounded-full bg-gray-950 px-4 py-3 text-sm font-medium text-white"
         >
           保存设置
         </button>

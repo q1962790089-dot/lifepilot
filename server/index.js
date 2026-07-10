@@ -47,6 +47,14 @@ function compactRecentOverview(overview) {
 function normalizePreferences(preferences) {
   const input = preferences && typeof preferences === 'object' ? preferences : {}
   const includes = (value, options, fallback) => options.includes(value) ? value : fallback
+  const focusAreas = [
+    'record_life',
+    'plan_tasks',
+    'chat_companion',
+    'self_observation',
+    'health_exercise',
+    'expense_tracking',
+  ]
 
   return {
     persona: includes(input.persona, ['clear', 'gentle', 'intimate'], 'gentle'),
@@ -55,11 +63,15 @@ function normalizePreferences(preferences) {
     replyLength: includes(input.replyLength, ['short', 'normal'], 'normal'),
     initiative: includes(input.initiative, ['low', 'medium'], 'low'),
     emojiUsage: includes(input.emojiUsage, ['none', 'occasional'], 'none'),
+    focusAreas: Array.isArray(input.focusAreas)
+      ? input.focusAreas.filter((area) => focusAreas.includes(area)).slice(0, 6)
+      : [],
   }
 }
 
 function getAddressText(preferences) {
   if (preferences.address === 'custom' || preferences.address === '名字') return preferences.customAddress
+  if (preferences.address === '你') return ''
   return preferences.address
 }
 
@@ -69,19 +81,24 @@ function getChatSystemPrompt(rawPreferences) {
   const personaRules = {
     clear: [
       '当前交流风格：清醒型。',
-      '表达冷静、简洁、直接，偏向帮助用户整理计划和解决问题。',
-      '不使用亲密称呼，不说鸡汤，不过度安慰。',
+      '必须直接、简短、行动导向，少情绪修饰。',
+      '优先帮助用户拆清楚事实、计划、下一步和注意事项。',
+      '不使用亲昵称呼，不说鸡汤，不过度安慰，不用暧昧或亲密语气。',
+      '记录类输入可用“已记录。”开头，然后给一个具体、可执行的小建议。',
     ],
     gentle: [
       '当前交流风格：温柔型。',
-      '表达温和自然，有适度陪伴感，不说教，不夸张安慰。',
-      '可以轻轻提醒用户照顾自己。',
+      '必须自然、温和，能接住情绪，但不说教、不夸张安慰、不过度亲密。',
+      '可以先确认用户感受，再给一个轻量建议。',
+      '不要把每次回复都变成心理咨询，也不要频繁反问。',
     ],
     intimate: [
       '当前交流风格：亲密型。',
-      '表达更亲近，可以使用用户选择的称呼，但不要油腻，不制造情感依赖。',
+      '表达更亲近，有陪伴感，可以使用用户选择的称呼，但不要油腻。',
+      '亲密感来自自然、稳定和轻柔的表达，不来自夸张承诺。',
       address ? `可使用称呼：“${address}”。` : '如果没有明确称呼，不要强行使用称呼。',
-      '禁止使用占有、责备或控制用户的表达，例如“你只能和我说”“不许离开我”“没有我你不行”“你怎么这么久没来”“只能依赖我”。',
+      '不要制造依赖，不要使用占有、责备或控制用户的表达。',
+      '禁止使用类似“你只能和我说”“不许离开我”“没有我你不行”“你怎么这么久没来”“只能依赖我”的表达。',
     ],
   }
 
@@ -90,6 +107,9 @@ function getChatSystemPrompt(rawPreferences) {
     '你的任务是陪用户记录生活、整理计划、理解情绪，而不是机械地重复“已记录”。',
     '人格设置只影响表达风格，不影响用户以前的记录、聊天和数据；同一套 LifePilot 记忆继续保留。',
     ...personaRules[preferences.persona],
+    preferences.focusAreas.length > 0
+      ? `用户主要关注：${preferences.focusAreas.join('、')}。这些只用于理解优先级，不要逐字复述。`
+      : '用户尚未选择主要关注方向，不要假设具体偏好。',
     preferences.replyLength === 'short'
       ? '回复长度：简短，通常 1 句话，最多 2 句话。'
       : '回复长度：适中，通常 1-3 句话；用户情绪不好时可以稍微多一点，但不要超过 5 句话。',
