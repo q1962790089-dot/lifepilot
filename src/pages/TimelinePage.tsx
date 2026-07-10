@@ -19,6 +19,7 @@ import type { LucideIcon } from 'lucide-react'
 import { deleteRecord, loadRecords, toggleTodoCompleted, updateRecord } from '../utils/storage'
 import { CATEGORY_LABELS } from '../types/record'
 import type { Category, LifeRecord } from '../types/record'
+import type { LifePilotPreferences } from '../types/preferences'
 
 type SummaryPeriod = 'week' | 'month'
 type TimelineView = 'list' | 'charts'
@@ -235,7 +236,7 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   )
 }
 
-function WeightTrendChart({ records }: { records: LifeRecord[] }) {
+function WeightTrendChart({ records, highlight }: { records: LifeRecord[]; highlight: boolean }) {
   const days = lastSevenDays()
   const values = days.map((day) => {
     const dayRecord = records
@@ -264,12 +265,12 @@ function WeightTrendChart({ records }: { records: LifeRecord[] }) {
   return (
     <div>
       <svg viewBox="0 0 296 120" className="h-36 w-full">
-        <polyline points={points} fill="none" stroke="#111827" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points={points} fill="none" stroke={highlight ? 'var(--accent)' : '#111827'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
         {values.map((value, index) => {
           if (value === null) return null
           const x = 16 + index * 44
           const y = 100 - ((value - min) / range) * 72
-          return <circle key={days[index]} cx={x} cy={y} r="4" fill="#111827" />
+          return <circle key={days[index]} cx={x} cy={y} r="4" fill={highlight ? 'var(--accent)' : '#111827'} />
         })}
       </svg>
       <div className="flex justify-between text-[10px] text-gray-400">
@@ -335,7 +336,7 @@ function ExpenseDonutChart({ records }: { records: LifeRecord[] }) {
   )
 }
 
-function SimpleBarChart({ entries }: { entries: { label: string; value: number }[] }) {
+function SimpleBarChart({ entries, highlight }: { entries: { label: string; value: number }[]; highlight: boolean }) {
   const max = Math.max(...entries.map((entry) => entry.value), 1)
 
   if (entries.length === 0 || entries.every((entry) => entry.value === 0)) return <EmptyChart />
@@ -350,7 +351,7 @@ function SimpleBarChart({ entries }: { entries: { label: string; value: number }
           </div>
           <div className="h-2.5 rounded-full bg-gray-100">
             <div
-              className="h-2.5 rounded-full bg-gray-950"
+              className={highlight ? 'h-2.5 rounded-full bg-[var(--accent)]' : 'h-2.5 rounded-full bg-gray-950'}
               style={{ width: `${Math.max(8, (entry.value / max) * 100)}%` }}
             />
           </div>
@@ -360,21 +361,21 @@ function SimpleBarChart({ entries }: { entries: { label: string; value: number }
   )
 }
 
-function ExerciseBarChart({ records }: { records: LifeRecord[] }) {
+function ExerciseBarChart({ records, highlight }: { records: LifeRecord[]; highlight: boolean }) {
   const days = lastSevenDays()
   const entries = days.map((day) => ({
     label: `${Number(day.slice(8))}日`,
     value: records.filter((record) => record.category === 'exercise' && record.date === day).length,
   }))
 
-  return <SimpleBarChart entries={entries} />
+  return <SimpleBarChart entries={entries} highlight={highlight} />
 }
 
-function TagFrequencyChart({ records }: { records: LifeRecord[] }) {
+function TagFrequencyChart({ records, highlight }: { records: LifeRecord[]; highlight: boolean }) {
   const entries = topEntries(countValues(records.flatMap((record) => record.tags ?? [])), 6)
     .map(([label, value]) => ({ label, value }))
 
-  return <SimpleBarChart entries={entries} />
+  return <SimpleBarChart entries={entries} highlight={highlight} />
 }
 
 function RecordEditor({
@@ -429,9 +430,11 @@ function RecordEditor({
 }
 
 function TimelinePage({
+  preferences,
   initialView = 'list',
   onViewChange,
 }: {
+  preferences: LifePilotPreferences
   initialView?: TimelineView
   onViewChange?: (view: TimelineView) => void
 }) {
@@ -440,7 +443,9 @@ function TimelinePage({
   const [summaries, setSummaries] = useState<Partial<Record<SummaryPeriod, PeriodSummaryState>>>({})
   const [loadingPeriod, setLoadingPeriod] = useState<SummaryPeriod | null>(null)
   const [view, setViewState] = useState<TimelineView>(initialView)
-  const [expandedSummary, setExpandedSummary] = useState<SummaryPeriod | null>(null)
+  const [expandedSummary, setExpandedSummary] = useState<SummaryPeriod | null>(() => preferences.layout.experienceMode === 'observer' ? 'week' : null)
+  const highlightCharts = preferences.personalityRecommendationAccepted
+  const isObserver = preferences.layout.experienceMode === 'observer'
   const groups = groupRecordsByDate(records)
 
   const weekRecords = useMemo(() => filterRecordsByPeriod(records, 'week'), [records])
@@ -449,6 +454,10 @@ function TimelinePage({
   useEffect(() => {
     setViewState(initialView)
   }, [initialView])
+
+  useEffect(() => {
+    if (isObserver) setExpandedSummary('week')
+  }, [isObserver])
 
   const setView = (nextView: TimelineView) => {
     setViewState(nextView)
@@ -510,7 +519,9 @@ function TimelinePage({
             key={key}
             onClick={() => setView(key)}
             className={`rounded-full px-3 py-2 text-sm font-medium transition-colors ${
-              view === key ? 'bg-gray-950 text-white' : 'text-gray-400'
+              view === key
+                ? highlightCharts ? 'bg-[var(--accent)] text-white' : 'bg-gray-950 text-white'
+                : 'text-gray-400'
             }`}
           >
             {label}
@@ -521,21 +532,21 @@ function TimelinePage({
       {view === 'charts' ? (
         <div className="space-y-4">
           <ChartCard title="最近 7 天体重趋势">
-            <WeightTrendChart records={records} />
+            <WeightTrendChart records={records} highlight={highlightCharts} />
           </ChartCard>
           <ChartCard title="本周消费分类">
             <ExpenseDonutChart records={weekRecords} />
           </ChartCard>
           <ChartCard title="本周运动记录">
-            <ExerciseBarChart records={weekRecords} />
+            <ExerciseBarChart records={weekRecords} highlight={highlightCharts} />
           </ChartCard>
           <ChartCard title="本周标签频率">
-            <TagFrequencyChart records={weekRecords} />
+            <TagFrequencyChart records={weekRecords} highlight={highlightCharts} />
           </ChartCard>
         </div>
       ) : (
         <>
-          <section aria-label="周期总结" className="mb-4 overflow-hidden rounded-3xl bg-white shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5">
+          <section aria-label="周期总结" className={`mb-4 overflow-hidden rounded-3xl bg-white shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ${isObserver ? 'ring-[var(--accent-ring)]' : 'ring-black/5'}`}>
             {([
               { period: 'week' as const, title: '本周', actionTitle: '本周总结', records: weekRecords },
               { period: 'month' as const, title: '本月', actionTitle: '本月总结', records: monthRecords },

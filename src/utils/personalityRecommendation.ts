@@ -4,9 +4,11 @@ import type {
   LifePilotPreferences,
   Persona,
   PersonalityGroup,
+  ReplyLength,
   SummaryStyle,
   ThemeAccent,
 } from '../types/preferences'
+import { createRecommendedLayout } from './homeLayout'
 import { normalizePreferences } from './preferences'
 
 export const PERSONALITY_TYPES = [
@@ -40,6 +42,7 @@ export interface PersonalityRecommendation {
   group: PersonalityGroup
   persona: Persona
   initiative: LifePilotPreferences['initiative']
+  replyLength: ReplyLength
   experienceMode: ExperienceMode
   summaryStyle: SummaryStyle
   homePriority: HomePriority
@@ -69,16 +72,45 @@ function getPersonalityGroup(type: string): PersonalityGroup {
   return 'explorer'
 }
 
+function recommendExperienceMode(type: string, group: PersonalityGroup): ExperienceMode {
+  if (group === 'diplomat') return 'companion'
+  if (group === 'analyst') return type.includes('J') ? 'planner' : 'observer'
+  if (type.includes('J')) return 'planner'
+  return 'flexible'
+}
+
+function modeFromFocusAreas(preferences: LifePilotPreferences): ExperienceMode | null {
+  if (preferences.focusAreas.includes('plan_tasks')) return 'planner'
+  if (preferences.focusAreas.includes('chat_companion')) return 'companion'
+  if (preferences.focusAreas.includes('self_observation')) return 'observer'
+  if (preferences.focusAreas.includes('record_life')) return 'flexible'
+  return null
+}
+
+function homePriorityForMode(experienceMode: ExperienceMode): HomePriority {
+  if (experienceMode === 'planner') return 'plans'
+  if (experienceMode === 'companion') return 'chat'
+  if (experienceMode === 'observer') return 'insights'
+  return 'quickCapture'
+}
+
 export function createPersonalityRecommendation(type: string): PersonalityRecommendation | null {
   const normalized = type.trim().toUpperCase()
   if (!PERSONALITY_TYPES.includes(normalized)) return null
 
   const group = getPersonalityGroup(normalized)
-  const persona: Persona = normalized.includes('T') ? 'clear' : 'gentle'
+  const experienceMode = recommendExperienceMode(normalized, group)
+  const persona: Persona = experienceMode === 'planner' || normalized.includes('T') ? 'clear' : 'gentle'
   const initiative: LifePilotPreferences['initiative'] = normalized.includes('E') ? 'medium' : 'low'
+  const replyLength: ReplyLength = experienceMode === 'flexible' ? 'short' : 'normal'
   const summaryStyle: SummaryStyle = normalized.includes('N') ? 'pattern' : 'concrete'
-  const experienceMode: ExperienceMode = normalized.includes('J') ? 'planner' : 'flexible'
-  const homePriority: HomePriority = normalized.includes('J') ? 'plans' : 'quickCapture'
+  const homePriority: HomePriority = experienceMode === 'planner'
+    ? 'plans'
+    : experienceMode === 'companion'
+      ? 'chat'
+      : experienceMode === 'observer'
+        ? 'insights'
+        : 'quickCapture'
   const themeAccent = PERSONALITY_GROUPS[group].accent
 
   return {
@@ -86,6 +118,7 @@ export function createPersonalityRecommendation(type: string): PersonalityRecomm
     group,
     persona,
     initiative,
+    replyLength,
     experienceMode,
     summaryStyle,
     homePriority,
@@ -121,6 +154,7 @@ export function applyPersonalityRecommendation(
   const inferredManualFields = next.personalityRecommendationAccepted ? [] : [
     next.persona !== 'gentle' ? 'persona' : '',
     next.initiative !== 'low' ? 'initiative' : '',
+    next.replyLength !== 'normal' ? 'replyLength' : '',
     next.experienceMode !== 'flexible' ? 'experienceMode' : '',
     next.summaryStyle !== 'concrete' ? 'summaryStyle' : '',
     next.homePriority !== 'quickCapture' ? 'homePriority' : '',
@@ -130,10 +164,15 @@ export function applyPersonalityRecommendation(
 
   setIfAllowed(next, 'persona', recommendation.persona, protectedFields)
   setIfAllowed(next, 'initiative', recommendation.initiative, protectedFields)
-  setIfAllowed(next, 'experienceMode', recommendation.experienceMode, protectedFields)
+  setIfAllowed(next, 'replyLength', recommendation.replyLength, protectedFields)
+  setIfAllowed(next, 'experienceMode', modeFromFocusAreas(next) ?? recommendation.experienceMode, protectedFields)
   setIfAllowed(next, 'summaryStyle', recommendation.summaryStyle, protectedFields)
-  setIfAllowed(next, 'homePriority', recommendation.homePriority, protectedFields)
+  setIfAllowed(next, 'homePriority', homePriorityForMode(next.experienceMode), protectedFields)
   setIfAllowed(next, 'themeAccent', recommendation.themeAccent, protectedFields)
+
+  if (!protectedFields.includes('layout')) {
+    next.layout = createRecommendedLayout(next.experienceMode)
+  }
 
   next.selfReportedPersonalityType = recommendation.type
   next.personalityGroup = recommendation.group

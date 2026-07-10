@@ -293,7 +293,7 @@ async function requestAiReply({
   return data.reply.trim()
 }
 
-function ChatPage() {
+function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
   const [messages, setMessages] = useState<Message[]>(loadMessages)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -379,7 +379,7 @@ function ChatPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="px-5 pb-4 pt-6">
+      <header className={`px-5 pb-4 ${preferences.layout.density === 'comfortable' ? 'pt-8' : 'pt-6'}`}>
         <div className="rounded-3xl bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gray-950 text-white">
@@ -393,7 +393,7 @@ function ChatPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-4">
+      <div className={`flex-1 overflow-y-auto px-5 pb-4 ${preferences.layout.density === 'comfortable' ? 'pt-3' : ''}`}>
         {messages.length === 0 && (
           <div className="mt-10 flex flex-col items-center text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-gray-500 shadow-sm ring-1 ring-black/5">

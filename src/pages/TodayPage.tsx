@@ -4,10 +4,12 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  ChevronDown,
   Circle,
   Pencil,
   Scale,
   Settings,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Wallet,
@@ -15,11 +17,12 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import PreferencesModal from '../components/PreferencesModal'
-import { loadPreferences } from '../utils/preferences'
+import HomeLayoutEditor from '../components/HomeLayoutEditor'
 import { deleteRecord, getTodayRecords, toggleTodoCompleted, updateRecord } from '../utils/storage'
+import { getPersonalityStatus } from '../utils/theme'
 import { CATEGORY_LABELS } from '../types/record'
 import type { LifeRecord, Category } from '../types/record'
-import type { LifePilotPreferences } from '../types/preferences'
+import type { HomeModuleId, LifePilotPreferences } from '../types/preferences'
 
 interface DailySummary {
   date: string
@@ -79,25 +82,12 @@ const SECTIONS: TodaySection[] = [
 
 const CATEGORY_OPTIONS: Category[] = ['journal', 'todo', 'weight', 'expense', 'exercise']
 
-function orderSections(sections: TodaySection[], preferences: LifePilotPreferences) {
-  const priorityByMode: Record<LifePilotPreferences['experienceMode'], Category[]> = {
-    planner: ['todo', 'journal', 'expense', 'exercise', 'weight'],
-    companion: ['journal', 'todo', 'exercise', 'weight', 'expense'],
-    observer: ['journal', 'exercise', 'weight', 'expense', 'todo'],
-    flexible: ['journal', 'todo', 'expense', 'exercise', 'weight'],
-  }
-  const priorityByHome: Partial<Record<LifePilotPreferences['homePriority'], Category[]>> = {
-    plans: ['todo'],
-    chat: ['journal'],
-    insights: ['journal', 'exercise', 'weight'],
-    quickCapture: ['journal', 'todo'],
-  }
-  const priority = [
-    ...(priorityByHome[preferences.homePriority] ?? []),
-    ...priorityByMode[preferences.experienceMode],
-  ]
-
-  return [...sections].sort((a, b) => priority.indexOf(a.category) - priority.indexOf(b.category))
+const MODULE_BY_CATEGORY: Record<Category, 'plans' | 'journal' | 'expense' | 'exercise' | 'weight'> = {
+  todo: 'plans',
+  journal: 'journal',
+  expense: 'expense',
+  exercise: 'exercise',
+  weight: 'weight',
 }
 
 function todayKey() {
@@ -248,12 +238,14 @@ function RecordEditor({
   )
 }
 
-function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
+function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPreferences; onOpenCharts?: () => void }) {
   const [records, setRecords] = useState<LifeRecord[]>([])
   const [editingId, setEditingId] = useState<number | null>(null)
   const [summary, setSummary] = useState<DailySummary | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [preferencesOpen, setPreferencesOpen] = useState(false)
+  const [homeEditorOpen, setHomeEditorOpen] = useState(false)
+  const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({})
   const currentDate = todayKey()
 
   useEffect(() => {
@@ -328,8 +320,16 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
     ;(acc[record.category] ??= []).push(record)
     return acc
   }, {})
-  const preferences = loadPreferences()
-  const sections = orderSections(SECTIONS, preferences)
+  const moduleById = new Map(preferences.layout.modules.map((module) => [module.id, module]))
+  const sections = SECTIONS
+    .filter((section) => moduleById.get(MODULE_BY_CATEGORY[section.category])?.visible)
+    .sort((a, b) => (moduleById.get(MODULE_BY_CATEGORY[a.category])?.order ?? 0) - (moduleById.get(MODULE_BY_CATEGORY[b.category])?.order ?? 0))
+  const isPlanner = preferences.layout.experienceMode === 'planner'
+  const personalityStatus = getPersonalityStatus(preferences)
+  const moduleOrder = (id: HomeModuleId) => moduleById.get(id)?.order ?? 99
+  const isCollapsed = (id: HomeModuleId) => expandedModules[id] ?? moduleById.get(id)?.collapsed ?? false
+  const toggleModule = (id: HomeModuleId) => setExpandedModules((current) => ({ ...current, [id]: !isCollapsed(id) }))
+  const densityClass = preferences.layout.density === 'compact' ? 'gap-3' : 'gap-5'
 
   const today = new Date().toLocaleDateString('zh-CN', {
     month: 'long',
@@ -345,6 +345,21 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
             <Sparkles size={14} strokeWidth={2} />
             <span>今日概览</span>
           </div>
+          {personalityStatus && (
+            <button
+              onClick={() => setPreferencesOpen(true)}
+              className="rounded-full bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-text)] ring-1 ring-[var(--accent-ring)]"
+            >
+              {personalityStatus}
+            </button>
+          )}
+          <button
+            onClick={() => setHomeEditorOpen(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm ring-1 ring-black/5"
+            aria-label="编辑首页"
+          >
+            <SlidersHorizontal size={16} strokeWidth={2.1} />
+          </button>
           <button
             onClick={() => setPreferencesOpen(true)}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm ring-1 ring-black/5"
@@ -355,7 +370,7 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-gray-950">{today}</h1>
         <p className="mt-1 text-sm text-gray-500">把今天发生的事，安静地放在这里。</p>
-        {onOpenCharts && (
+        {onOpenCharts && !isPlanner && moduleById.get('insights') === undefined && (
           <button
             onClick={onOpenCharts}
             className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-black/5"
@@ -365,7 +380,7 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
         )}
       </header>
 
-      <div className="space-y-4">
+      <div className={`flex flex-col ${densityClass}`}>
         {sections.map((section) => {
           const items = grouped[section.category] ?? []
           const Icon = section.icon
@@ -373,11 +388,16 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
           return (
             <section
               key={section.category}
-              className="rounded-3xl bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5"
+              className={`rounded-3xl bg-white ${preferences.layout.density === 'compact' ? 'p-3.5' : 'p-4'} shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5`}
+              style={{ order: moduleOrder(MODULE_BY_CATEGORY[section.category]) }}
             >
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${section.iconClassName}`}>
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+                    isPlanner && section.category === 'todo'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                      : section.iconClassName
+                  }`}>
                     <Icon size={20} strokeWidth={2} />
                   </div>
                   <div>
@@ -385,9 +405,16 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
                     <p className="text-xs text-gray-400">{items.length} 条记录</p>
                   </div>
                 </div>
+                <button
+                  onClick={() => toggleModule(MODULE_BY_CATEGORY[section.category])}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-50 text-gray-400"
+                  aria-label={isCollapsed(MODULE_BY_CATEGORY[section.category]) ? `展开${section.title}` : `收起${section.title}`}
+                >
+                  <ChevronDown className={isCollapsed(MODULE_BY_CATEGORY[section.category]) ? '-rotate-90 transition-transform' : 'transition-transform'} size={16} />
+                </button>
               </div>
 
-              {items.length === 0 ? (
+              {!isCollapsed(MODULE_BY_CATEGORY[section.category]) && (items.length === 0 ? (
                 <p className="rounded-2xl bg-gray-50 px-3 py-3 text-sm text-gray-400">
                   {section.emptyText}
                 </p>
@@ -407,7 +434,7 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
                           {record.category === 'todo' && (
                             <button
                               onClick={() => handleToggleTodo(record.id)}
-                              className={`mt-0.5 text-blue-600 ${record.completed ? '' : 'text-gray-300'}`}
+                              className={`mt-0.5 ${record.completed ? 'text-[var(--accent)]' : 'text-gray-300'}`}
                               aria-label={record.completed ? '标记未完成' : '标记完成'}
                             >
                               {record.completed ? <CheckCircle2 size={20} /> : <Circle size={20} />}
@@ -456,12 +483,15 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
                     )
                   ))}
                 </div>
-              )}
+              ))}
             </section>
           )
         })}
 
-        <section className="rounded-3xl bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5">
+        {moduleById.get('summary')?.visible && <section
+          className={`rounded-3xl bg-white ${preferences.layout.density === 'compact' ? 'p-3.5' : 'p-4'} shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5`}
+          style={{ order: moduleOrder('summary') }}
+        >
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-950 text-white">
@@ -474,9 +504,12 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
                 </p>
               </div>
             </div>
+            <button onClick={() => toggleModule('summary')} className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-50 text-gray-400" aria-label={isCollapsed('summary') ? '展开今日总结' : '收起今日总结'}>
+              <ChevronDown className={isCollapsed('summary') ? '-rotate-90 transition-transform' : 'transition-transform'} size={16} />
+            </button>
           </div>
 
-          {records.length === 0 ? (
+          {!isCollapsed('summary') && (records.length === 0 ? (
             <p className="rounded-2xl bg-gray-50 px-3 py-3 text-sm leading-relaxed text-gray-400">
               今天还没有足够的记录，晚点再来总结也可以。
             </p>
@@ -500,10 +533,20 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
                 {summaryLoading ? '正在生成...' : summary ? '重新生成' : '生成今日总结'}
               </button>
             </div>
-          )}
-        </section>
+          ))}
+        </section>}
+        {moduleById.get('insights')?.visible && onOpenCharts && !isCollapsed('insights') && (
+          <button
+            onClick={onOpenCharts}
+            className="rounded-3xl bg-white px-4 py-3 text-left text-sm font-medium text-gray-600 shadow-[0_12px_35px_rgba(15,23,42,0.06)] ring-1 ring-black/5"
+            style={{ order: moduleOrder('insights') }}
+          >
+            查看趋势与图表
+          </button>
+        )}
       </div>
       <PreferencesModal open={preferencesOpen} onClose={() => setPreferencesOpen(false)} />
+      <HomeLayoutEditor open={homeEditorOpen} preferences={preferences} onClose={() => setHomeEditorOpen(false)} />
     </div>
   )
 }

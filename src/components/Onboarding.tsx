@@ -8,9 +8,10 @@ import {
   PERSONALITY_GROUPS,
 } from '../utils/personalityRecommendation'
 import { completeOnboarding, DEFAULT_PREFERENCES, getAddressText } from '../utils/preferences'
+import { getPersonalityStatus } from '../utils/theme'
 
 interface OnboardingProps {
-  onComplete: () => void
+  onComplete: (appliedStatus?: string) => void
 }
 
 const PERSONA_OPTIONS: { value: Persona; label: string; description: string; preview: string }[] = [
@@ -99,6 +100,7 @@ function Onboarding({ onComplete }: OnboardingProps) {
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState<LifePilotPreferences>(DEFAULT_PREFERENCES)
   const [selectedType, setSelectedType] = useState('')
+  const [recommendationAccepted, setRecommendationAccepted] = useState(false)
   const recommendation = useMemo(
     () => selectedType ? createPersonalityRecommendation(selectedType) : null,
     [selectedType],
@@ -120,7 +122,7 @@ function Onboarding({ onComplete }: OnboardingProps) {
 
   const finish = (preferences = draft) => {
     completeOnboarding(preferences)
-    onComplete()
+    onComplete(recommendationAccepted ? getPersonalityStatus(preferences) ?? undefined : undefined)
   }
 
   const skipAll = () => {
@@ -135,6 +137,7 @@ function Onboarding({ onComplete }: OnboardingProps) {
   const useRecommendation = () => {
     if (!recommendation) return
     setDraft((current) => applyPersonalityRecommendation(current, recommendation))
+    setRecommendationAccepted(true)
     setStep(2)
   }
 

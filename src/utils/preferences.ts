@@ -1,7 +1,9 @@
 import type { LifePilotPreferences } from '../types/preferences'
+import { createRecommendedLayout, normalizeHomeLayout } from './homeLayout'
 
 const PREFERENCES_KEY = 'lifepilot_preferences'
 const ONBOARDING_COMPLETED_KEY = 'lifepilot_onboarding_completed'
+export const PREFERENCES_CHANGED_EVENT = 'lifepilot:preferences-changed'
 
 export const DEFAULT_PREFERENCES: LifePilotPreferences = {
   persona: 'gentle',
@@ -16,6 +18,7 @@ export const DEFAULT_PREFERENCES: LifePilotPreferences = {
   summaryStyle: 'concrete',
   homePriority: 'quickCapture',
   themeAccent: 'purple',
+  layout: createRecommendedLayout('flexible'),
   manualOverrides: [],
 }
 
@@ -47,6 +50,10 @@ export function normalizePreferences(value: unknown): LifePilotPreferences {
     ? value as Partial<LifePilotPreferences>
     : {}
 
+  const experienceMode = isOneOf(input.experienceMode, EXPERIENCE_MODES)
+    ? input.experienceMode
+    : DEFAULT_PREFERENCES.experienceMode
+
   return {
     persona: isOneOf(input.persona, PERSONAS) ? input.persona : DEFAULT_PREFERENCES.persona,
     address: isOneOf(input.address, ADDRESSES) ? input.address : DEFAULT_PREFERENCES.address,
@@ -62,12 +69,11 @@ export function normalizePreferences(value: unknown): LifePilotPreferences {
       : undefined,
     personalityGroup: isOneOf(input.personalityGroup, PERSONALITY_GROUPS) ? input.personalityGroup : undefined,
     personalityRecommendationAccepted: Boolean(input.personalityRecommendationAccepted),
-    experienceMode: isOneOf(input.experienceMode, EXPERIENCE_MODES)
-      ? input.experienceMode
-      : DEFAULT_PREFERENCES.experienceMode,
+    experienceMode,
     summaryStyle: isOneOf(input.summaryStyle, SUMMARY_STYLES) ? input.summaryStyle : DEFAULT_PREFERENCES.summaryStyle,
     homePriority: isOneOf(input.homePriority, HOME_PRIORITIES) ? input.homePriority : DEFAULT_PREFERENCES.homePriority,
     themeAccent: isOneOf(input.themeAccent, THEME_ACCENTS) ? input.themeAccent : DEFAULT_PREFERENCES.themeAccent,
+    layout: normalizeHomeLayout(input.layout, experienceMode),
     manualOverrides: Array.isArray(input.manualOverrides)
       ? input.manualOverrides.filter((item): item is string => typeof item === 'string')
       : [],
@@ -86,7 +92,15 @@ export function loadPreferences(): LifePilotPreferences {
 }
 
 export function savePreferences(preferences: LifePilotPreferences) {
-  localStorage.setItem(PREFERENCES_KEY, JSON.stringify(normalizePreferences(preferences)))
+  const next = normalizePreferences(preferences)
+  localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next))
+  window.dispatchEvent(new CustomEvent(PREFERENCES_CHANGED_EVENT, { detail: next }))
+
+  if (import.meta.env.DEV) {
+    console.log('LifePilot preferences applied:', next)
+  }
+
+  return next
 }
 
 export function getAddressText(preferences: LifePilotPreferences) {
