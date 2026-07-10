@@ -19,7 +19,6 @@ import type { LucideIcon } from 'lucide-react'
 import PreferencesModal from '../components/PreferencesModal'
 import HomeLayoutEditor from '../components/HomeLayoutEditor'
 import { deleteRecord, getTodayRecords, toggleTodoCompleted, updateRecord } from '../utils/storage'
-import { getPersonalityStatus } from '../utils/theme'
 import { CATEGORY_LABELS } from '../types/record'
 import type { LifeRecord, Category } from '../types/record'
 import type { HomeModuleId, LifePilotPreferences } from '../types/preferences'
@@ -325,7 +324,6 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
     .filter((section) => moduleById.get(MODULE_BY_CATEGORY[section.category])?.visible)
     .sort((a, b) => (moduleById.get(MODULE_BY_CATEGORY[a.category])?.order ?? 0) - (moduleById.get(MODULE_BY_CATEGORY[b.category])?.order ?? 0))
   const isPlanner = preferences.layout.experienceMode === 'planner'
-  const personalityStatus = getPersonalityStatus(preferences)
   const moduleOrder = (id: HomeModuleId) => moduleById.get(id)?.order ?? 99
   const isCollapsed = (id: HomeModuleId) => expandedModules[id] ?? moduleById.get(id)?.collapsed ?? false
   const toggleModule = (id: HomeModuleId) => setExpandedModules((current) => ({ ...current, [id]: !isCollapsed(id) }))
@@ -345,14 +343,7 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
             <Sparkles size={14} strokeWidth={2} />
             <span>今日概览</span>
           </div>
-          {personalityStatus && (
-            <button
-              onClick={() => setPreferencesOpen(true)}
-              className="rounded-full bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-text)] ring-1 ring-[var(--accent-ring)]"
-            >
-              {personalityStatus}
-            </button>
-          )}
+          <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setHomeEditorOpen(true)}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm ring-1 ring-black/5"
@@ -367,10 +358,11 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
           >
             <Settings size={16} strokeWidth={2.1} />
           </button>
+          </div>
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-gray-950">{today}</h1>
         <p className="mt-1 text-sm text-gray-500">把今天发生的事，安静地放在这里。</p>
-        {onOpenCharts && !isPlanner && moduleById.get('insights') === undefined && (
+        {onOpenCharts && moduleById.get('insights') === undefined && (
           <button
             onClick={onOpenCharts}
             className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-black/5"
