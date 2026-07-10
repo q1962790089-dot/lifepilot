@@ -7,12 +7,14 @@ import {
   Circle,
   Pencil,
   Scale,
+  Settings,
   Sparkles,
   Trash2,
   Wallet,
   X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import PreferencesModal from '../components/PreferencesModal'
 import { deleteRecord, getTodayRecords, toggleTodoCompleted, updateRecord } from '../utils/storage'
 import { CATEGORY_LABELS } from '../types/record'
 import type { LifeRecord, Category } from '../types/record'
@@ -226,6 +228,7 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [summary, setSummary] = useState<DailySummary | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
+  const [preferencesOpen, setPreferencesOpen] = useState(false)
   const currentDate = todayKey()
 
   useEffect(() => {
@@ -310,9 +313,18 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
   return (
     <div className="min-h-full px-5 py-6">
       <header className="mb-6">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-gray-500 shadow-sm ring-1 ring-black/5">
-          <Sparkles size={14} strokeWidth={2} />
-          <span>今日概览</span>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-gray-500 shadow-sm ring-1 ring-black/5">
+            <Sparkles size={14} strokeWidth={2} />
+            <span>今日概览</span>
+          </div>
+          <button
+            onClick={() => setPreferencesOpen(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm ring-1 ring-black/5"
+            aria-label="AI 交流设置"
+          >
+            <Settings size={16} strokeWidth={2.1} />
+          </button>
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-gray-950">{today}</h1>
         <p className="mt-1 text-sm text-gray-500">把今天发生的事，安静地放在这里。</p>
@@ -464,6 +476,7 @@ function TodayPage({ onOpenCharts }: { onOpenCharts?: () => void }) {
           )}
         </section>
       </div>
+      <PreferencesModal open={preferencesOpen} onClose={() => setPreferencesOpen(false)} />
     </div>
   )
 }

@@ -2,8 +2,10 @@ import { useState, useRef, useEffect } from 'react'
 import { MessageCircle, SendHorizontal, Sparkles } from 'lucide-react'
 import { recognize } from '../utils/recognize'
 import { inferTodoDueDate } from '../utils/dueDate'
+import { getAddressText, loadPreferences } from '../utils/preferences'
 import { addRecord, getTodayRecords, loadRecords } from '../utils/storage'
 import { generateTags } from '../utils/tags'
+import type { LifePilotPreferences } from '../types/preferences'
 import type { Category } from '../types/record'
 
 type Intent = 'record' | 'chat' | 'question'
@@ -24,14 +26,6 @@ const REPLY_KEYWORDS: Partial<Record<Category, string[]>> = {
   expense: ['花了', '买了', '支付', '元', '块'],
   exercise: ['跑步', '健身', '走路', '公里', '步'],
   todo: ['明天', '记得', '计划', '要做', '待办'],
-}
-
-const CATEGORY_NAMES: Record<Category, string> = {
-  journal: '日记',
-  todo: '计划',
-  weight: '体重',
-  expense: '消费',
-  exercise: '运动',
 }
 
 const SINGLE_CATEGORY_REPLIES: Record<Category, string[]> = {
@@ -142,15 +136,61 @@ function getReplyCategories(text: string): Category[] {
   return categories.length > 0 ? categories : ['journal']
 }
 
+const FALLBACK_CATEGORY_NAMES: Record<Category, string> = {
+  journal: '日记',
+  todo: '计划',
+  weight: '体重',
+  expense: '消费',
+  exercise: '运动',
+}
+
 function formatCategoryList(categories: Category[]) {
-  const names = categories.map((category) => CATEGORY_NAMES[category])
+  const names = categories.map((category) => FALLBACK_CATEGORY_NAMES[category])
 
   if (names.length <= 1) return names[0]
   if (names.length === 2) return `${names[0]}和${names[1]}`
   return `${names.slice(0, -1).join('、')}和${names[names.length - 1]}`
 }
 
-function createFallbackReply(intent: Intent, categories: Category[], seed: number) {
+function applyEmoji(text: string, preferences: LifePilotPreferences) {
+  if (preferences.emojiUsage !== 'occasional') return text
+  if (preferences.persona === 'clear') return text
+  return `${text} 🙂`
+}
+
+function createFallbackReply(
+  intent: Intent,
+  categories: Category[],
+  seed: number,
+  preferences: LifePilotPreferences,
+) {
+  const address = getAddressText(preferences)
+  const call = preferences.persona === 'intimate' && address ? `${address}，` : ''
+  const categoryText = formatCategoryList(categories)
+  const firstCategory = categories[0]
+
+  if (preferences.persona === 'clear') {
+    if (intent === 'chat') return '我在。先把当前最重要的一件事说清楚，我们再一起整理。'
+    if (intent === 'question') return '可以。先基于已有记录看，不足的部分之后再补充。'
+    if (categories.length > 1) return `已记录：${categoryText}。`
+    if (firstCategory === 'todo') return '已记录。建议确认时间、地点和下一步要做的事。'
+    if (firstCategory === 'expense') return '已记录这笔消费。'
+    if (firstCategory === 'weight') return '已记录体重。先稳定观察，不急着判断。'
+    if (firstCategory === 'exercise') return '已记录运动。'
+    return '已记录。'
+  }
+
+  if (preferences.persona === 'intimate') {
+    if (intent === 'chat') return applyEmoji(`${call}我在。你可以慢慢说，不用一下子整理好。`, preferences)
+    if (intent === 'question') return `${call}我先根据已有记录帮你看，信息不够的地方我们之后再补。`
+    if (categories.length > 1) return `${call}已帮你记录${categoryText}。`
+    if (firstCategory === 'todo') return `${call}记下来了，晚点可以提前准备一下，别让自己太赶。`
+    if (firstCategory === 'expense') return `${call}这笔消费记好啦，之后回看会更清楚。`
+    if (firstCategory === 'weight') return `${call}体重记好啦，慢慢观察就好。`
+    if (firstCategory === 'exercise') return `${call}运动记好啦，按自己的节奏来。`
+    return `${call}我帮你记下来了。`
+  }
+
   if (intent === 'chat') {
     return CHAT_REPLIES[seed % CHAT_REPLIES.length]
   }
@@ -160,7 +200,7 @@ function createFallbackReply(intent: Intent, categories: Category[], seed: numbe
   }
 
   if (categories.length > 1) {
-    return `已帮你记录${formatCategoryList(categories)}。`
+    return `已帮你记录${categoryText}。`
   }
 
   const replies = SINGLE_CATEGORY_REPLIES[categories[0]]
@@ -207,6 +247,7 @@ async function requestAiReply({
   categories,
   todayRecords,
   recentOverview,
+  preferences,
   messages,
   fallbackReply,
 }: {
@@ -216,6 +257,7 @@ async function requestAiReply({
   categories: Category[]
   todayRecords: ReturnType<typeof getTodayRecords>
   recentOverview: ReturnType<typeof getRecentOverview>
+  preferences: LifePilotPreferences
   messages: Message[]
   fallbackReply: string
 }) {
@@ -231,6 +273,7 @@ async function requestAiReply({
       categories,
       todayRecords,
       recentOverview,
+      preferences,
       messages,
       fallbackReply,
     }),
@@ -269,6 +312,7 @@ function ChatPage() {
     const intent = getIntent(text)
     const replyCategories = getReplyCategories(text)
     const recentMessages = messages.slice(-6)
+    const preferences = loadPreferences()
     const dueDate = category === 'todo' ? inferTodoDueDate(text) : undefined
 
     addRecord({
@@ -294,7 +338,7 @@ function ChatPage() {
     setInput('')
     setSending(true)
 
-    const fallbackReply = createFallbackReply(intent, replyCategories, now.getTime())
+    const fallbackReply = createFallbackReply(intent, replyCategories, now.getTime(), preferences)
     let reply = fallbackReply
 
     try {
@@ -305,6 +349,7 @@ function ChatPage() {
         categories: replyCategories,
         todayRecords: getTodayRecords(),
         recentOverview: getRecentOverview(),
+        preferences,
         messages: recentMessages,
         fallbackReply,
       })
