@@ -1,4 +1,5 @@
 export type Category = 'journal' | 'todo' | 'weight' | 'expense' | 'exercise'
+export type TodoTimePrecision = 'date' | 'datetime'
 
 export interface LifeRecord {
   id: number
@@ -7,6 +8,12 @@ export interface LifeRecord {
   createdAt: string
   date: string
   dueDate?: string
+  scheduledAt?: string
+  timePrecision?: TodoTimePrecision
+  hasExplicitTime?: boolean
+  reminderEnabled?: boolean
+  reminderAt?: string
+  remindedAt?: string
   tags?: string[]
   completed?: boolean
   extracted?: ExtractedData

@@ -8,6 +8,7 @@
     "api": "node server/index.js",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node --test server/todoSchedule.test.js",
     "preview": "vite preview",
     "start": "node server/index.js"
   },

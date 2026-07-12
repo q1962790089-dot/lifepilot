@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Activity,
+  Bell,
   BookOpen,
   Check,
   CheckCircle2,
@@ -19,9 +20,12 @@ import type { LucideIcon } from 'lucide-react'
 import PreferencesModal from '../components/PreferencesModal'
 import HomeLayoutEditor from '../components/HomeLayoutEditor'
 import { deleteRecord, getTodayRecords, toggleTodoCompleted, updateRecord } from '../utils/storage'
+import type { TodoScheduleUpdate } from '../utils/storage'
 import { CATEGORY_LABELS } from '../types/record'
 import type { LifeRecord, Category } from '../types/record'
 import type { HomeModuleId, LifePilotPreferences } from '../types/preferences'
+import { createScheduledAt, getLocalDateKey, getScheduleDate, getScheduledTime } from '../utils/todoSchedule'
+import { useTodoReminders } from '../hooks/useTodoReminders'
 
 interface DailySummary {
   date: string
@@ -90,7 +94,7 @@ const MODULE_BY_CATEGORY: Record<Category, 'plans' | 'journal' | 'expense' | 'ex
 }
 
 function todayKey() {
-  return new Date().toISOString().slice(0, 10)
+  return getLocalDateKey()
 }
 
 function formatTime(createdAt: string) {
@@ -118,6 +122,15 @@ function formatDueDate(dueDate?: string) {
   if (dueDate === todayKey) return '今天'
   if (dueDate === tomorrowKey) return '明天'
   return dueDate
+}
+
+function formatTodoSchedule(record: LifeRecord) {
+  if (record.timePrecision === 'datetime' && record.scheduledAt) {
+    const time = getScheduledTime(record)
+    if (time) return `${formatDueDate(getScheduleDate(record))} ${time}`
+  }
+
+  return record.dueDate ? `截止 ${formatDueDate(record.dueDate)}` : ''
 }
 
 function loadDailySummaries(): Record<string, DailySummary> {
@@ -193,10 +206,38 @@ function RecordEditor({
 }: {
   record: LifeRecord
   onCancel: () => void
-  onSave: (id: number, text: string, category: Category) => void
+  onSave: (id: number, text: string, category: Category, schedule?: TodoScheduleUpdate) => void
 }) {
   const [text, setText] = useState(record.text)
   const [category, setCategory] = useState<Category>(record.category)
+  const [dueDate, setDueDate] = useState(record.dueDate ?? '')
+  const [time, setTime] = useState(getScheduledTime(record))
+
+  const saveRecord = () => {
+    const schedule = category === 'todo'
+      ? time && dueDate
+        ? {
+            dueDate,
+            scheduledAt: createScheduledAt(dueDate, time),
+            timePrecision: 'datetime' as const,
+            hasExplicitTime: true,
+            reminderEnabled: true,
+            reminderAt: createScheduledAt(dueDate, time),
+            remindedAt: undefined,
+          }
+        : {
+            dueDate: dueDate || undefined,
+            scheduledAt: undefined,
+            timePrecision: 'date' as const,
+            hasExplicitTime: false,
+            reminderEnabled: false,
+            reminderAt: undefined,
+            remindedAt: undefined,
+          }
+      : undefined
+
+    onSave(record.id, text.trim(), category, schedule)
+  }
 
   return (
     <article className="rounded-2xl bg-gray-50 px-3.5 py-3">
@@ -218,7 +259,7 @@ function RecordEditor({
           ))}
         </select>
         <button
-          onClick={() => onSave(record.id, text.trim(), category)}
+          onClick={saveRecord}
           disabled={!text.trim()}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-950 text-white disabled:opacity-30"
           aria-label="保存"
@@ -233,6 +274,35 @@ function RecordEditor({
           <X size={16} strokeWidth={2.2} />
         </button>
       </div>
+      {category === 'todo' && (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(event) => setDueDate(event.target.value)}
+            onInput={(event) => setDueDate(event.currentTarget.value)}
+            className="min-w-0 flex-1 rounded-full border border-black/5 bg-white px-3 py-2 text-xs text-gray-600 outline-none"
+            aria-label="计划日期"
+          />
+          <input
+            type="time"
+            value={time}
+            onChange={(event) => setTime(event.target.value)}
+            onInput={(event) => setTime(event.currentTarget.value)}
+            className="w-24 rounded-full border border-black/5 bg-white px-3 py-2 text-xs text-gray-600 outline-none"
+            aria-label="计划时间"
+          />
+          {time && (
+            <button
+              onClick={() => setTime('')}
+              className="rounded-full bg-white px-2 py-2 text-[11px] text-gray-400 ring-1 ring-black/5"
+              aria-label="清除时间"
+            >
+              清除
+            </button>
+          )}
+        </div>
+      )}
     </article>
   )
 }
@@ -245,6 +315,12 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
   const [preferencesOpen, setPreferencesOpen] = useState(false)
   const [homeEditorOpen, setHomeEditorOpen] = useState(false)
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({})
+  const [reminderNotice, setReminderNotice] = useState<string | null>(null)
+  const [canRequestNotification, setCanRequestNotification] = useState(() => (
+    typeof Notification !== 'undefined'
+    && Notification.permission === 'default'
+    && localStorage.getItem('lifepilot_notification_permission_requested') !== 'true'
+  ))
   const currentDate = todayKey()
 
   useEffect(() => {
@@ -309,10 +385,27 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
     setRecords(filterToday(toggleTodoCompleted(id)))
   }
 
-  const handleSave = (id: number, text: string, category: Category) => {
+  const handleSave = (id: number, text: string, category: Category, schedule?: TodoScheduleUpdate) => {
     if (!text) return
-    setRecords(filterToday(updateRecord(id, { text, category })))
+    setRecords(filterToday(updateRecord(id, { text, category, ...schedule })))
     setEditingId(null)
+  }
+
+  const handleDueReminders = useCallback((dueRecords: LifeRecord[]) => {
+    setReminderNotice(dueRecords.length === 1
+      ? `任务提醒：${dueRecords[0].text}`
+      : `有 ${dueRecords.length} 个任务需要处理`)
+    setRecords(getTodayRecords())
+  }, [])
+
+  useTodoReminders(handleDueReminders)
+
+  const requestNotificationPermission = async () => {
+    localStorage.setItem('lifepilot_notification_permission_requested', 'true')
+    setCanRequestNotification(false)
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      await Notification.requestPermission()
+    }
   }
 
   const grouped = records.reduce<Partial<Record<Category, LifeRecord[]>>>((acc, record) => {
@@ -344,6 +437,16 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
             <span>今日概览</span>
           </div>
           <div className="ml-auto flex items-center gap-2">
+          {canRequestNotification && (
+            <button
+              onClick={() => void requestNotificationPermission()}
+              className="flex h-9 items-center gap-1.5 rounded-full bg-white px-3 text-xs font-medium text-gray-500 shadow-sm ring-1 ring-black/5"
+              aria-label="开启任务提醒"
+            >
+              <Bell size={15} strokeWidth={2.1} />
+              开启提醒
+            </button>
+          )}
           <button
             onClick={() => setHomeEditorOpen(true)}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm ring-1 ring-black/5"
@@ -450,8 +553,9 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
                             )}
                             <p className="mt-2 text-xs text-gray-400">
                               {record.category === 'todo' ? (record.completed ? '已完成 · ' : '未完成 · ') : ''}
-                              {record.category === 'todo' && record.dueDate ? `截止 ${formatDueDate(record.dueDate)} · ` : ''}
-                              {formatTime(record.createdAt)}
+                              {record.category === 'todo'
+                                ? formatTodoSchedule(record)
+                                : formatTime(record.createdAt)}
                             </p>
                           </div>
                           <div className="flex shrink-0 gap-1">
@@ -537,6 +641,13 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
           </button>
         )}
       </div>
+      {reminderNotice && (
+        <div className="fixed inset-x-5 bottom-24 z-30 flex items-center gap-3 rounded-2xl bg-gray-950 px-4 py-3 text-sm text-white shadow-xl">
+          <Bell size={18} />
+          <p className="min-w-0 flex-1">{reminderNotice}</p>
+          <button onClick={() => setReminderNotice(null)} className="text-xs text-white/70" aria-label="关闭提醒">关闭</button>
+        </div>
+      )}
       <PreferencesModal open={preferencesOpen} onClose={() => setPreferencesOpen(false)} />
       <HomeLayoutEditor open={homeEditorOpen} preferences={preferences} onClose={() => setHomeEditorOpen(false)} />
     </div>

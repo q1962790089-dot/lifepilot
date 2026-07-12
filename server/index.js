@@ -2,6 +2,7 @@ import 'dotenv/config'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
+import { buildScheduledAt, isDateKey, isTimeValue } from './todoSchedule.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions'
@@ -195,13 +196,14 @@ const RECORD_CATEGORIES = ['journal', 'todo', 'weight', 'expense', 'exercise']
 function getExtractionSystemPrompt() {
   return [
     '你是 LifePilot 的结构化记录提取器。只从当前用户消息提取明确、可保存的生活事实；绝不与用户聊天。',
-    '只输出一个合法 JSON 对象，格式必须是 {"records":[{"category":"journal|todo|weight|expense|exercise","text":"简洁且完整的记录内容","dueDate":"YYYY-MM-DD，仅 todo 有明确日期时提供"}]}。不要 Markdown、解释、额外字段或自然语言。',
+    '只输出一个合法 JSON 对象，格式必须是 {"records":[{"category":"journal|todo|weight|expense|exercise","text":"简洁且完整的记录内容","dueDate":"YYYY-MM-DD，仅 todo 有明确日期时提供","time":"HH:mm，仅 todo 有明确钟点时提供"}]}。records 始终是数组。不要 Markdown、解释、额外字段或自然语言。',
     'expense：用户明确说了消费、购买或金额；weight：明确体重；exercise：明确运动事实；todo：明确要做、提醒、日程或承诺；journal：用户明确要求记录/写日记，或清楚地陈述一段希望保存的生活事实。',
     '普通闲聊、抱怨、发泄、求建议、对 AI 的反馈、没有明确记录意图的情绪表达都返回 {"records":[]}。不要把“今天好累”“不想上班”“被领导骂了”自动变成记录。',
     '一条消息可以输出零条、一条或多条 records。Todo 按“能否独立完成、勾选或取消”判断：多个独立任务分别输出多条 todo；不要把多个独立任务拼成一条，也不要只因逗号、并且、然后或再而机械拆分。',
-    '保持一个整体 Todo 的情况：同一次购物（如去超市买牛奶、鸡蛋和西瓜）、同一个连续流程或同一个最终目标（如去医院做雾化、送狗去宠物店洗澡、整理房间并处理不用的东西）。',
-    'todo 的 text 必须是用户一眼能理解的完整动作，例如“去医院做雾化”“送狗去宠物店洗澡”“买一个大西瓜”；不要直接使用整句，不要过度压缩。若 dueDate 已保存日期，text 不要重复今天/明天；项目没有单独时间字段时，下午三点、晚上等时间可以保留在 text 中。',
-    '使用输入的 date 解析今天和明天为 YYYY-MM-DD。共同日期要继承到每一条拆分后的 todo；不同时间或日期的动作分别输出，并分别填各自 dueDate。没有明确日期时省略 dueDate。',
+    '购物例外：用户明确列举多个商品时，即使属于同一次购物，也要按商品拆成独立 todo，便于逐项勾选。保留共同地点和动作，例如“明天去超市买桃子、鸡蛋和西瓜”必须生成“去超市买桃子”“去超市买鸡蛋”“去超市买西瓜”。“买牙膏、洗发水和纸巾”也拆成三条。',
+    '保持一个整体 Todo 的情况：一个完整动作、连续流程或最终目标，例如去医院做雾化、送狗去宠物店洗澡、去餐厅吃饭、整理房间并处理不用的东西；不要把它们按动词拆开。',
+    'todo 的 text 必须是用户一眼能理解的完整动作，例如“去医院做雾化”“送狗去宠物店洗澡”“去超市买桃子”；不要直接使用整句，不要过度压缩。若 dueDate 已保存日期，text 不要重复今天/明天。',
+    '使用输入的 date 解析今天和明天为 YYYY-MM-DD。共同日期和明确时间要继承到每一条拆分后的 todo；不同时间或日期的动作分别输出，并分别填各自 dueDate 和 time。没有明确日期时省略 dueDate；没有明确钟点时绝不填写 time。',
     '已完成的过去事件不能变成未完成 todo；如需记录，只输出一条保留完整事件的 journal，不能按动作拆成多条 journal。否定、取消或“不用买了”的内容不能生成 todo。条件性或可选任务（如“有时间的话再去洗车”）默认不提取。',
     '只使用用户明确说出的事实。不得猜测金额、日期、原因、人物、情绪、动机或医疗信息。不得把抱怨自动变成 Todo。',
     '默认只处理当前用户消息；不要引用聊天历史、长期记忆、人格设置或回复风格。',
@@ -237,10 +239,6 @@ function inferTodoDueDate(text, date) {
   const dueDate = new Date(`${date}T12:00:00`)
   if (text.includes('明天')) dueDate.setDate(dueDate.getDate() + 1)
   return dueDate.toISOString().slice(0, 10)
-}
-
-function isDateKey(value) {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
 }
 
 function generateRecordTags(text, category) {
@@ -322,11 +320,24 @@ function normalizeExtractedRecords(payload, extraction) {
         ? item.dueDate
         : inferTodoDueDate(sourceText, date)
       : undefined
+    const time = category === 'todo' && item && typeof item === 'object' && isTimeValue(item.time)
+      ? item.time
+      : undefined
+    const scheduledAt = dueDate && time
+      ? buildScheduledAt(dueDate, time, typeof recordContext.timeZone === 'string' ? recordContext.timeZone : 'UTC')
+      : undefined
     const extracted = buildExtractedData(text, category)
 
     records.push({
       ...record,
       ...(dueDate ? { dueDate } : {}),
+      ...(scheduledAt ? {
+        scheduledAt,
+        timePrecision: 'datetime',
+        hasExplicitTime: true,
+        reminderEnabled: true,
+        reminderAt: scheduledAt,
+      } : category === 'todo' ? { timePrecision: 'date', hasExplicitTime: false } : {}),
       ...(extracted ? { extracted } : {}),
     })
   }

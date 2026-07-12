@@ -3,6 +3,7 @@ import { MessageCircle, SendHorizontal, Sparkles } from 'lucide-react'
 import { recognize } from '../utils/recognize'
 import { getAddressText, loadPreferences } from '../utils/preferences'
 import { addRecord, getTodayRecords, loadRecords } from '../utils/storage'
+import { getLocalDateKey } from '../utils/todoSchedule'
 import type { LifePilotPreferences } from '../types/preferences'
 import type { Category, LifeRecord } from '../types/record'
 
@@ -313,7 +314,7 @@ async function requestAiReply({
   preferences: LifePilotPreferences
   messages: Message[]
   fallbackReply: string
-  recordContext: Pick<LifeRecord, 'id' | 'createdAt' | 'date'>
+  recordContext: Pick<LifeRecord, 'id' | 'createdAt' | 'date'> & { timeZone?: string }
 }) {
   const response = await fetch('/api/chat', {
     method: 'POST',
@@ -415,7 +416,8 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
         recordContext: {
           id: now.getTime(),
           createdAt: now.toISOString(),
-          date: now.toISOString().slice(0, 10),
+          date: getLocalDateKey(now),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
       })
       reply = result.reply
