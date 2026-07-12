@@ -74,7 +74,7 @@ export function updateRecord(
     }
 
     if (nextCategory === 'todo' && (updates.text !== undefined || updates.category !== undefined || updates.dueDate !== undefined)) {
-      nextRecord.dueDate = updates.dueDate ?? inferTodoDueDate(nextRecord.text)
+      nextRecord.dueDate = updates.dueDate ?? record.dueDate ?? inferTodoDueDate(nextRecord.text)
     }
 
     return normalizeRecord(nextRecord)
