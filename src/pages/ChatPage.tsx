@@ -169,24 +169,28 @@ function createHumanFallbackReply(text: string, intent: Intent, preferences: Lif
     return '这件事确实很重，先不用逼自己立刻整理好。眼前最需要你做什么，我们就先顾哪一件。'
   }
   if (/(冷淡|敷衍|没接住)/.test(normalized)) {
-    return '被你发现了。刚才那句确实有点敷衍，重来。'
+    return '好吧，刚才那句不算，重来。'
+  }
+  if (/(别分析|只想骂|就是想骂)/.test(normalized)) {
+    return '行，你骂，我听着。'
   }
   if (/(怎么(办|回复|说|选)|是不是我的错|谁的错|合不合理)/.test(normalized) || intent === 'question') {
     return direct
-      ? '先把已知事实和你的感受分开。你把最关键的前后经过说清楚，我会直接帮你拆。'
-      : '先别急着把责任全往自己身上揽。把最关键的前后经过摆出来，我们再认真拆。'
+      ? '先别急着解释。把对方要你改的点、标准和时间确认清楚，最后把结论留成文字。'
+      : '先别急着把责任全揽走。把对方要你改的点、标准和时间确认清楚，最后把结论留成文字。'
   }
   if (/(领导|老板).*(说|骂|批评)|被.*(说|骂|批评)/.test(normalized)) {
-    return '他今天又发什么疯？先别急着怪自己，把原话交出来，我听听。'
+    return '又是他？我现在对这人意见很大。'
   }
   if (/(好累|很累|累死|疲惫)/.test(normalized)) {
     return direct ? '今天够了。先把非必要的事停掉，去休息。' : '这是去拯救世界了吗？先躺一会儿，今天别再给自己加项目了。'
   }
   if (/(什么都没干|啥都没干)/.test(normalized)) {
-    return '那就批准你今天当一天废物。放心，地球不会因为你休息一天停止转。'
+    return '那今天就这样。地球不会因为你歇一天停止转。'
   }
   if (/(外卖|点餐).*(\d+|元)|又点.*外卖/.test(normalized)) {
-    return '点就点了，今天先让外卖救你一命。账我记着，罪名不成立。'
+    const amount = normalized.match(/(\d+(?:\.\d+)?)\s*(?:元|块)/)?.[1]
+    return amount ? `记上了，${amount} 块。希望这顿别踩雷。` : '记上了。希望这顿别踩雷。'
   }
   if (/(不想上班|不想工作)/.test(normalized)) {
     return '正常。发自内心热爱上班的人，我一般不太信。'
@@ -209,6 +213,14 @@ function createFallbackReply(
   const call = preferences.persona === 'intimate' && address ? `${address}，` : ''
   const categoryText = formatCategoryList(categories)
   const firstCategory = categories[0]
+
+  if (intent === 'record' && categories.length === 1) {
+    if (firstCategory === 'todo') return '记上了。'
+    if (firstCategory === 'expense') return '记上了。'
+    if (firstCategory === 'weight') return '记上了，先看趋势。'
+    if (firstCategory === 'exercise') return '记上了。'
+    if (firstCategory === 'journal') return '记上了。'
+  }
 
   if (preferences.persona === 'clear') {
     if (intent === 'chat') return '我在。先把当前最重要的一件事说清楚，我们再一起整理。'
