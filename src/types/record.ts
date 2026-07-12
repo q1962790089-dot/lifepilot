@@ -14,6 +14,8 @@ export interface LifeRecord {
   reminderEnabled?: boolean
   reminderAt?: string
   remindedAt?: string
+  timeZone?: string
+  sourceTimeText?: string
   tags?: string[]
   completed?: boolean
   extracted?: ExtractedData

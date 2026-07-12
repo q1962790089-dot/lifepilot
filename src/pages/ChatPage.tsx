@@ -3,7 +3,8 @@ import { MessageCircle, SendHorizontal, Sparkles } from 'lucide-react'
 import { recognize } from '../utils/recognize'
 import { getAddressText, loadPreferences } from '../utils/preferences'
 import { addRecord, getTodayRecords, loadRecords } from '../utils/storage'
-import { getLocalDateKey } from '../utils/todoSchedule'
+import { createMessageTimeContext } from '../utils/messageTimeContext'
+import type { MessageTimeContext } from '../utils/messageTimeContext'
 import type { LifePilotPreferences } from '../types/preferences'
 import type { Category, LifeRecord } from '../types/record'
 
@@ -304,6 +305,7 @@ async function requestAiReply({
   messages,
   fallbackReply,
   recordContext,
+  messageTimeContext,
 }: {
   text: string
   category: Category
@@ -314,7 +316,8 @@ async function requestAiReply({
   preferences: LifePilotPreferences
   messages: Message[]
   fallbackReply: string
-  recordContext: Pick<LifeRecord, 'id' | 'createdAt' | 'date'> & { timeZone?: string }
+  recordContext: Pick<LifeRecord, 'id'>
+  messageTimeContext: MessageTimeContext
 }) {
   const response = await fetch('/api/chat', {
     method: 'POST',
@@ -332,6 +335,7 @@ async function requestAiReply({
       messages,
       fallbackReply,
       recordContext,
+      messageTimeContext,
     }),
   })
 
@@ -379,7 +383,8 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
     const text = input.trim()
     if (!text || sending) return
 
-    const now = new Date()
+    const messageTimeContext = createMessageTimeContext()
+    const now = new Date(messageTimeContext.sentAtUtc)
     const category = recognize(text)
     const intent = getIntent(text)
     const replyCategories = getReplyCategories(text)
@@ -389,7 +394,7 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
       id: now.getTime(),
       text,
       sender: 'user',
-      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: messageTimeContext.localTime,
     }
 
     const withoutAi = [...messages, userMsg]
@@ -415,10 +420,8 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
         fallbackReply,
         recordContext: {
           id: now.getTime(),
-          createdAt: now.toISOString(),
-          date: getLocalDateKey(now),
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
+        messageTimeContext,
       })
       reply = result.reply
       extractedRecords = result.records
@@ -432,7 +435,7 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
       id: now.getTime() + 1,
       text: reply,
       sender: 'ai',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: messageTimeContext.localTime,
     }
 
     const withAi = [...withoutAi, aiMsg]

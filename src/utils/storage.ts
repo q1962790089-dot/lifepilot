@@ -4,14 +4,14 @@ import { generateTags } from './tags'
 import { getLocalDateKey } from './todoSchedule'
 
 const RECORDS_KEY = 'lifepilot_records'
-const SCHEDULE_FIELDS = ['scheduledAt', 'timePrecision', 'hasExplicitTime', 'reminderEnabled', 'reminderAt', 'remindedAt'] as const
+const SCHEDULE_FIELDS = ['scheduledAt', 'timePrecision', 'hasExplicitTime', 'reminderEnabled', 'reminderAt', 'remindedAt', 'timeZone', 'sourceTimeText'] as const
 
 export type TodoScheduleUpdate = Partial<Pick<LifeRecord,
-  'dueDate' | 'scheduledAt' | 'timePrecision' | 'hasExplicitTime' | 'reminderEnabled' | 'reminderAt' | 'remindedAt'
+  'dueDate' | 'scheduledAt' | 'timePrecision' | 'hasExplicitTime' | 'reminderEnabled' | 'reminderAt' | 'remindedAt' | 'timeZone' | 'sourceTimeText'
 >>
 
 type RecordUpdate = Partial<Pick<LifeRecord,
-  'text' | 'category' | 'completed' | 'dueDate' | 'scheduledAt' | 'timePrecision' | 'hasExplicitTime' | 'reminderEnabled' | 'reminderAt' | 'remindedAt'
+  'text' | 'category' | 'completed' | 'dueDate' | 'scheduledAt' | 'timePrecision' | 'hasExplicitTime' | 'reminderEnabled' | 'reminderAt' | 'remindedAt' | 'timeZone' | 'sourceTimeText'
 >>
 
 function isIsoDateTime(value?: string) {
@@ -28,7 +28,7 @@ function normalizeRecord(record: LifeRecord): LifeRecord {
     const dueDate = typeof record.dueDate === 'string' && record.dueDate
       ? record.dueDate
       : inferTodoDueDate(record.text)
-    const { dueDate: _dueDate, scheduledAt: _scheduledAt, timePrecision: _timePrecision, hasExplicitTime: _hasExplicitTime, reminderEnabled: _reminderEnabled, reminderAt: _reminderAt, remindedAt: _remindedAt, ...todoBase } = base
+    const { dueDate: _dueDate, scheduledAt: _scheduledAt, timePrecision: _timePrecision, hasExplicitTime: _hasExplicitTime, reminderEnabled: _reminderEnabled, reminderAt: _reminderAt, remindedAt: _remindedAt, timeZone: _timeZone, sourceTimeText: _sourceTimeText, ...todoBase } = base
     const hasDatePrecision = base.timePrecision === 'date' || base.timePrecision === 'datetime' || typeof base.hasExplicitTime === 'boolean'
     const hasScheduledTime = base.timePrecision === 'datetime' && isIsoDateTime(base.scheduledAt)
 
@@ -43,6 +43,8 @@ function normalizeRecord(record: LifeRecord): LifeRecord {
         reminderEnabled: base.reminderEnabled !== false,
         reminderAt: isIsoDateTime(base.reminderAt) ? base.reminderAt : base.scheduledAt,
         ...(isIsoDateTime(base.remindedAt) ? { remindedAt: base.remindedAt } : {}),
+        ...(typeof base.timeZone === 'string' ? { timeZone: base.timeZone } : {}),
+        ...(typeof base.sourceTimeText === 'string' ? { sourceTimeText: base.sourceTimeText } : {}),
       } : hasDatePrecision ? {
         timePrecision: 'date' as const,
         hasExplicitTime: false,
@@ -51,7 +53,7 @@ function normalizeRecord(record: LifeRecord): LifeRecord {
     }
   }
 
-  const { completed: _completed, dueDate: _dueDate, scheduledAt: _scheduledAt, timePrecision: _timePrecision, hasExplicitTime: _hasExplicitTime, reminderEnabled: _reminderEnabled, reminderAt: _reminderAt, remindedAt: _remindedAt, ...rest } = base
+  const { completed: _completed, dueDate: _dueDate, scheduledAt: _scheduledAt, timePrecision: _timePrecision, hasExplicitTime: _hasExplicitTime, reminderEnabled: _reminderEnabled, reminderAt: _reminderAt, remindedAt: _remindedAt, timeZone: _timeZone, sourceTimeText: _sourceTimeText, ...rest } = base
   return rest
 }
 

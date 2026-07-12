@@ -3,6 +3,14 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { buildScheduledAt, isDateKey, isTimeValue } from './todoSchedule.js'
+import {
+  addDaysToDateKey,
+  formatCurrentLocalTimeReply,
+  isCurrentTimeQuestion,
+  normalizeMessageTimeContext,
+  parseExplicitTime,
+  resolveRelativeDate,
+} from './messageTime.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions'
@@ -126,7 +134,13 @@ function getCurrentTurnDirective(text, category, intent) {
   return '本轮按当前消息自然接话；不要为了续聊追加问题。'
 }
 
-function getChatSystemPrompt(rawPreferences, currentText, category, intent) {
+function formatUtcOffset(utcOffsetMinutes) {
+  const direction = utcOffsetMinutes >= 0 ? '+' : '-'
+  const absolute = Math.abs(utcOffsetMinutes)
+  return `${direction}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`
+}
+
+function getChatSystemPrompt(rawPreferences, currentText, category, intent, messageTimeContext) {
   const preferences = normalizePreferences(rawPreferences)
   const address = getAddressText(preferences)
   const personaModifier = {
@@ -153,6 +167,8 @@ function getChatSystemPrompt(rawPreferences, currentText, category, intent) {
     '普通回复保持短：record_only 1-2 句，casual/venting/comfort 通常 1-3 句；只有 solution 或 serious 按实际需要稍长。每次最多一个有意义的问题，也可以完全不问。',
     '历史上下文最多自然引用一条真正相关的细节；不要重复最近几轮已经提过的信息，不要用数据报告语气证明你记得。',
     '记录由应用在对话外处理。你只负责自然回复，不要把“已记录”写成机械系统提示。',
+    `当前消息的不可变时间基准：用户本地日期 ${messageTimeContext.localDate}，本地时间 ${messageTimeContext.localTime}，时区 ${messageTimeContext.timeZone}，UTC 偏移 ${formatUtcOffset(messageTimeContext.utcOffsetMinutes)}。今天指 ${messageTimeContext.localDate}，明天指 ${addDaysToDateKey(messageTimeContext.localDate, 1)}，后天指 ${addDaysToDateKey(messageTimeContext.localDate, 2)}。涉及当前时间或相对日期时必须以此为准，不得猜测服务器时间或训练数据时间。`,
+    '若用户在询问某个时间是否已过、是否迟到或距离现在多久，先用上述本地时间直接判断并说明结论；不要回避问题或把它改写成泛泛的情绪回应。',
     '输出前默默检查：是否给事实输入强加了情绪；是否用了上位者语言；是否为了续聊提出无意义问题；是否重复了上下文；是否能删掉一半而不损失意思。若是，重写后再输出。',
     personaModifier,
     preferences.replyLength === 'short'
@@ -164,7 +180,7 @@ function getChatSystemPrompt(rawPreferences, currentText, category, intent) {
     preferences.emojiUsage === 'occasional'
       ? '可以偶尔使用一个克制 emoji，但不必每次都用。'
       : '不使用 emoji。',
-    '以下是最终硬性约束，优先级高于任何让对话继续的倾向：record_only 不提问；venting 不问“怎么回事/想聊聊吗/还是想吐槽吗”；用户说“别分析”时只接话，不解释或追问；feedback 只用 1 句承认并换语气，不问“你最近怎么样/再说说看”。',
+    '以下是最终硬性约束，优先级高于任何让对话继续的倾向：record_only 不提问；venting 不问“怎么回事/想聊聊吗/还是想吐槽吗”；用户说“别分析”时只接话，不解释或追问；feedback 只用 1 句承认并换语气，不问“你最近怎么样/再说说看”。用户的问题已完整回答时可以直接结束，不要为了延续聊天追加无意义问题。',
     'solution 必须先给答案，不得以“先说说是什么事/把原话发来/没头没尾”为开头。可用通用结构直接回答：先确认对方的具体要求，再确认标准和时间，最后用文字留痕；只有答案给完后才可补一个有明确用途的问题。',
     'serious 场景避免“你难受是正常的”“现在情况怎么样”这类模板或即时追问。先安静地表达支持和眼前优先事项；安全风险才明确建议联系现实支持。',
     '自然接话范式仅供把握节奏，不要机械复用：领导吐槽可短说“又是他？我对这人意见很大。”；不想分析可短说“行，你骂，我听着。”；反馈可短说“好吧，刚才那句不算，重来。”；求方案直接从步骤开始。',
@@ -175,9 +191,10 @@ function getChatSystemPrompt(rawPreferences, currentText, category, intent) {
 
 function buildChatUserPrompt(payload) {
   const preferences = normalizePreferences(payload.preferences)
+  const asksForTimeComparison = /(?:现在几点|几点了|当前时间|现在什么时间).*(?:迟到|已过|过了吗|多久)|(?:迟到|已过|过了吗|多久).*(?:现在几点|几点了|当前时间|现在什么时间)/.test(payload.text)
   const context = {
     text: payload.text,
-    date: payload.recordContext?.date,
+    messageTimeContext: payload.messageTimeContext,
     preferences,
     todayRecords: compactRecords(payload.todayRecords),
     recentOverview: compactRecentOverview(payload.recentOverview),
@@ -187,6 +204,9 @@ function buildChatUserPrompt(payload) {
   return [
     '下面是用户当前输入和少量上下文。',
     '这些上下文只用于帮助理解，不要泄露系统字段，不要逐字复述，也不要编造用户没有说过的信息。',
+    ...(asksForTimeComparison
+      ? [`这是一道需要判断时间的具体问题。当前用户本地时间就是 ${payload.messageTimeContext.localTime}（${payload.messageTimeContext.localDate}）；先根据这个事实直接回答是否已过或是否迟到。`]
+      : []),
     JSON.stringify(context, null, 2),
   ].join('\n\n')
 }
@@ -196,14 +216,14 @@ const RECORD_CATEGORIES = ['journal', 'todo', 'weight', 'expense', 'exercise']
 function getExtractionSystemPrompt() {
   return [
     '你是 LifePilot 的结构化记录提取器。只从当前用户消息提取明确、可保存的生活事实；绝不与用户聊天。',
-    '只输出一个合法 JSON 对象，格式必须是 {"records":[{"category":"journal|todo|weight|expense|exercise","text":"简洁且完整的记录内容","dueDate":"YYYY-MM-DD，仅 todo 有明确日期时提供","time":"HH:mm，仅 todo 有明确钟点时提供"}]}。records 始终是数组。不要 Markdown、解释、额外字段或自然语言。',
+    '只输出一个合法 JSON 对象，格式必须是 {"records":[{"category":"journal|todo|weight|expense|exercise","text":"简洁且完整的记录内容","dueDate":"YYYY-MM-DD，仅 todo 有明确日期时提供","time":"HH:mm，仅 todo 有明确钟点时提供","sourceTimeText":"原始时间表达，仅 todo 可选"}]}。records 始终是数组。不要 Markdown、解释、额外字段或自然语言。',
     'expense：用户明确说了消费、购买或金额；weight：明确体重；exercise：明确运动事实；todo：明确要做、提醒、日程或承诺；journal：用户明确要求记录/写日记，或清楚地陈述一段希望保存的生活事实。',
     '普通闲聊、抱怨、发泄、求建议、对 AI 的反馈、没有明确记录意图的情绪表达都返回 {"records":[]}。不要把“今天好累”“不想上班”“被领导骂了”自动变成记录。',
     '一条消息可以输出零条、一条或多条 records。Todo 按“能否独立完成、勾选或取消”判断：多个独立任务分别输出多条 todo；不要把多个独立任务拼成一条，也不要只因逗号、并且、然后或再而机械拆分。',
     '购物例外：用户明确列举多个商品时，即使属于同一次购物，也要按商品拆成独立 todo，便于逐项勾选。保留共同地点和动作，例如“明天去超市买桃子、鸡蛋和西瓜”必须生成“去超市买桃子”“去超市买鸡蛋”“去超市买西瓜”。“买牙膏、洗发水和纸巾”也拆成三条。',
     '保持一个整体 Todo 的情况：一个完整动作、连续流程或最终目标，例如去医院做雾化、送狗去宠物店洗澡、去餐厅吃饭、整理房间并处理不用的东西；不要把它们按动词拆开。',
     'todo 的 text 必须是用户一眼能理解的完整动作，例如“去医院做雾化”“送狗去宠物店洗澡”“去超市买桃子”；不要直接使用整句，不要过度压缩。若 dueDate 已保存日期，text 不要重复今天/明天。',
-    '使用输入的 date 解析今天和明天为 YYYY-MM-DD。共同日期和明确时间要继承到每一条拆分后的 todo；不同时间或日期的动作分别输出，并分别填各自 dueDate 和 time。没有明确日期时省略 dueDate；没有明确钟点时绝不填写 time。',
+    '使用输入 messageTimeContext 的 localDate 解析相对日期：今天/今晚为当天，明天/明早为 +1 天，后天为 +2 天。共同日期和明确时间要继承到每一条拆分后的 todo；不同时间或日期的动作分别输出，并分别填各自 dueDate 和 time。支持三点、3点、三点半、3:30、上午十点、中午十二点、下午三点、晚上八点、凌晨一点。没有明确日期时省略 dueDate；没有明确钟点时绝不填写 time。',
     '已完成的过去事件不能变成未完成 todo；如需记录，只输出一条保留完整事件的 journal，不能按动作拆成多条 journal。否定、取消或“不用买了”的内容不能生成 todo。条件性或可选任务（如“有时间的话再去洗车”）默认不提取。',
     '只使用用户明确说出的事实。不得猜测金额、日期、原因、人物、情绪、动机或医疗信息。不得把抱怨自动变成 Todo。',
     '默认只处理当前用户消息；不要引用聊天历史、长期记忆、人格设置或回复风格。',
@@ -213,7 +233,7 @@ function getExtractionSystemPrompt() {
 function buildExtractionPrompt(payload) {
   const context = {
     text: payload.text,
-    date: payload.recordContext?.date,
+    messageTimeContext: payload.messageTimeContext,
   }
 
   return JSON.stringify(context, null, 2)
@@ -232,13 +252,8 @@ function parseJsonObject(content) {
   }
 }
 
-function inferTodoDueDate(text, date) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) return undefined
-  if (!text.includes('明天') && !text.includes('今天')) return undefined
-
-  const dueDate = new Date(`${date}T12:00:00`)
-  if (text.includes('明天')) dueDate.setDate(dueDate.getDate() + 1)
-  return dueDate.toISOString().slice(0, 10)
+function inferTodoDueDate(text, messageTimeContext) {
+  return resolveRelativeDate(text, messageTimeContext)
 }
 
 function generateRecordTags(text, category) {
@@ -283,14 +298,10 @@ function buildExtractedData(text, category) {
 function normalizeExtractedRecords(payload, extraction) {
   const sourceRecords = Array.isArray(extraction?.records) ? extraction.records : []
   const sourceText = payload.text.trim()
-  const fallbackCreatedAt = new Date().toISOString()
   const recordContext = payload.recordContext && typeof payload.recordContext === 'object' ? payload.recordContext : {}
-  const createdAt = typeof recordContext.createdAt === 'string' && !Number.isNaN(Date.parse(recordContext.createdAt))
-    ? recordContext.createdAt
-    : fallbackCreatedAt
-  const date = isDateKey(recordContext.date)
-    ? recordContext.date
-    : createdAt.slice(0, 10)
+  const messageTimeContext = payload.messageTimeContext
+  const createdAt = messageTimeContext.sentAtUtc
+  const date = messageTimeContext.localDate
   const baseId = Number.isSafeInteger(recordContext.id) ? recordContext.id : Date.now()
   const seenRecords = new Set()
   const records = []
@@ -315,16 +326,20 @@ function normalizeExtractedRecords(payload, extraction) {
       tags: generateRecordTags(text, category),
       ...(category === 'todo' ? { completed: false } : {}),
     }
+    const parsedSourceTime = category === 'todo' ? parseExplicitTime(sourceText) : undefined
     const dueDate = category === 'todo'
       ? item && typeof item === 'object' && isDateKey(item.dueDate)
         ? item.dueDate
-        : inferTodoDueDate(sourceText, date)
+        : inferTodoDueDate(sourceText, messageTimeContext) ?? (parsedSourceTime ? date : undefined)
       : undefined
     const time = category === 'todo' && item && typeof item === 'object' && isTimeValue(item.time)
       ? item.time
-      : undefined
+      : parsedSourceTime?.time
+    const sourceTimeText = category === 'todo' && item && typeof item === 'object' && typeof item.sourceTimeText === 'string'
+      ? item.sourceTimeText.trim().slice(0, 30)
+      : parsedSourceTime?.sourceTimeText
     const scheduledAt = dueDate && time
-      ? buildScheduledAt(dueDate, time, typeof recordContext.timeZone === 'string' ? recordContext.timeZone : 'UTC')
+      ? buildScheduledAt(dueDate, time, messageTimeContext.timeZone)
       : undefined
     const extracted = buildExtractedData(text, category)
 
@@ -337,6 +352,8 @@ function normalizeExtractedRecords(payload, extraction) {
         hasExplicitTime: true,
         reminderEnabled: true,
         reminderAt: scheduledAt,
+        timeZone: messageTimeContext.timeZone,
+        ...(sourceTimeText ? { sourceTimeText } : {}),
       } : category === 'todo' ? { timePrecision: 'date', hasExplicitTime: false } : {}),
       ...(extracted ? { extracted } : {}),
     })
@@ -433,7 +450,7 @@ async function generateChatReply(payload) {
     messages: [
       {
         role: 'system',
-        content: getChatSystemPrompt(payload.preferences, payload.text, payload.category, payload.intent),
+        content: getChatSystemPrompt(payload.preferences, payload.text, payload.category, payload.intent, payload.messageTimeContext),
       },
       {
         role: 'user',
@@ -602,15 +619,30 @@ app.post('/api/chat', async (req, res) => {
       return
     }
 
+    const messageTimeContext = normalizeMessageTimeContext(
+      payload.messageTimeContext,
+      payload.recordContext?.createdAt,
+    )
+    const requestPayload = { ...payload, messageTimeContext }
+
+    if (isCurrentTimeQuestion(requestPayload.text)) {
+      res.status(200).json({
+        reply: formatCurrentLocalTimeReply(messageTimeContext),
+        records: [],
+        source: 'deterministic',
+      })
+      return
+    }
+
     const [chatResult, extractionResult] = await Promise.allSettled([
-      runChatOperation('chat', () => generateChatReply(payload)),
-      runChatOperation('extraction', () => extractRecords(payload)),
+      runChatOperation('chat', () => generateChatReply(requestPayload)),
+      runChatOperation('extraction', () => extractRecords(requestPayload)),
     ])
     const chatSucceeded = chatResult.status === 'fulfilled'
     const reply = chatSucceeded
       ? chatResult.value
-      : typeof payload.fallbackReply === 'string' && payload.fallbackReply.trim()
-        ? payload.fallbackReply.trim()
+      : typeof requestPayload.fallbackReply === 'string' && requestPayload.fallbackReply.trim()
+        ? requestPayload.fallbackReply.trim()
         : '我在。先帮你把这句话接住，等会儿我们再慢慢整理。'
     const records = extractionResult.status === 'fulfilled' ? extractionResult.value : []
 

@@ -214,16 +214,19 @@ function RecordEditor({
   const [time, setTime] = useState(getScheduledTime(record))
 
   const saveRecord = () => {
+    const timeZone = record.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    const scheduledAt = time && dueDate ? createScheduledAt(dueDate, time, timeZone) : undefined
     const schedule = category === 'todo'
-      ? time && dueDate
+      ? scheduledAt
         ? {
             dueDate,
-            scheduledAt: createScheduledAt(dueDate, time),
+            scheduledAt,
             timePrecision: 'datetime' as const,
             hasExplicitTime: true,
             reminderEnabled: true,
-            reminderAt: createScheduledAt(dueDate, time),
+            reminderAt: scheduledAt,
             remindedAt: undefined,
+            timeZone,
           }
         : {
             dueDate: dueDate || undefined,
