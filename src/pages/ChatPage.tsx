@@ -1,12 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { MessageCircle, SendHorizontal, Sparkles } from 'lucide-react'
 import { recognize } from '../utils/recognize'
-import { inferTodoDueDate } from '../utils/dueDate'
 import { getAddressText, loadPreferences } from '../utils/preferences'
 import { addRecord, getTodayRecords, loadRecords } from '../utils/storage'
-import { generateTags } from '../utils/tags'
 import type { LifePilotPreferences } from '../types/preferences'
-import type { Category } from '../types/record'
+import type { Category, LifeRecord } from '../types/record'
 
 type Intent = 'record' | 'chat' | 'question'
 
@@ -20,6 +18,7 @@ interface Message {
 const STORAGE_KEY = 'lifepilot_chat_messages'
 
 const REPLY_CATEGORY_ORDER: Category[] = ['weight', 'expense', 'exercise', 'todo']
+const RECORD_CATEGORY_SET = new Set<Category>(['journal', 'todo', 'weight', 'expense', 'exercise'])
 
 const REPLY_KEYWORDS: Partial<Record<Category, string[]>> = {
   weight: ['kg', '公斤', '斤', '体重'],
@@ -303,6 +302,7 @@ async function requestAiReply({
   preferences,
   messages,
   fallbackReply,
+  recordContext,
 }: {
   text: string
   category: Category
@@ -313,6 +313,7 @@ async function requestAiReply({
   preferences: LifePilotPreferences
   messages: Message[]
   fallbackReply: string
+  recordContext: Pick<LifeRecord, 'id' | 'createdAt' | 'date'>
 }) {
   const response = await fetch('/api/chat', {
     method: 'POST',
@@ -329,6 +330,7 @@ async function requestAiReply({
       preferences,
       messages,
       fallbackReply,
+      recordContext,
     }),
   })
 
@@ -343,7 +345,23 @@ async function requestAiReply({
     throw new Error('AI returned empty reply')
   }
 
-  return data.reply.trim()
+  const records = Array.isArray(data.records)
+    ? data.records.filter(isLifeRecord)
+    : []
+
+  return { reply: data.reply.trim(), records }
+}
+
+function isLifeRecord(value: unknown): value is LifeRecord {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+
+  return typeof record.id === 'number'
+    && typeof record.text === 'string'
+    && typeof record.category === 'string'
+    && RECORD_CATEGORY_SET.has(record.category as Category)
+    && typeof record.createdAt === 'string'
+    && typeof record.date === 'string'
 }
 
 function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
@@ -366,18 +384,6 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
     const replyCategories = getReplyCategories(text)
     const recentMessages = messages.slice(-6)
     const preferences = loadPreferences()
-    const dueDate = category === 'todo' ? inferTodoDueDate(text) : undefined
-
-    addRecord({
-      id: now.getTime(),
-      text,
-      category,
-      createdAt: now.toISOString(),
-      date: now.toISOString().slice(0, 10),
-      ...(dueDate ? { dueDate } : {}),
-      tags: generateTags(text, category),
-    })
-
     const userMsg: Message = {
       id: now.getTime(),
       text,
@@ -393,9 +399,10 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
 
     const fallbackReply = createFallbackReply(text, intent, replyCategories, now.getTime(), preferences)
     let reply = fallbackReply
+    let extractedRecords: LifeRecord[] = []
 
     try {
-      reply = await requestAiReply({
+      const result = await requestAiReply({
         text,
         category,
         intent,
@@ -405,10 +412,19 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
         preferences,
         messages: recentMessages,
         fallbackReply,
+        recordContext: {
+          id: now.getTime(),
+          createdAt: now.toISOString(),
+          date: now.toISOString().slice(0, 10),
+        },
       })
+      reply = result.reply
+      extractedRecords = result.records
     } catch {
       console.log('[LifePilot] chat reply source:', 'fallback')
     }
+
+    extractedRecords.forEach((record) => addRecord(record))
 
     const aiMsg: Message = {
       id: now.getTime() + 1,

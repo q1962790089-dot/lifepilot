@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions'
+const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions'
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -151,7 +151,7 @@ function getChatSystemPrompt(rawPreferences, currentText, category, intent) {
     '不要公开解释对话策略，例如“现在先不分析”“等你气消再判断”“我正在认真倾听”。直接用自然的回应表现出来。',
     '普通回复保持短：record_only 1-2 句，casual/venting/comfort 通常 1-3 句；只有 solution 或 serious 按实际需要稍长。每次最多一个有意义的问题，也可以完全不问。',
     '历史上下文最多自然引用一条真正相关的细节；不要重复最近几轮已经提过的信息，不要用数据报告语气证明你记得。',
-    '记录分类和保存由系统外部完成。不要把“已记录”写成机械系统提示，也不要改变记录字段、JSON 或前端解析。',
+    '记录由应用在对话外处理。你只负责自然回复，不要把“已记录”写成机械系统提示。',
     '输出前默默检查：是否给事实输入强加了情绪；是否用了上位者语言；是否为了续聊提出无意义问题；是否重复了上下文；是否能删掉一半而不损失意思。若是，重写后再输出。',
     personaModifier,
     preferences.replyLength === 'short'
@@ -172,12 +172,11 @@ function getChatSystemPrompt(rawPreferences, currentText, category, intent) {
   ].join('\n')
 }
 
-function buildUserPrompt(payload) {
+function buildChatUserPrompt(payload) {
   const preferences = normalizePreferences(payload.preferences)
   const context = {
     text: payload.text,
-    category: payload.category,
-    intent: payload.intent,
+    date: payload.recordContext?.date,
     preferences,
     todayRecords: compactRecords(payload.todayRecords),
     recentOverview: compactRecentOverview(payload.recentOverview),
@@ -189,6 +188,128 @@ function buildUserPrompt(payload) {
     '这些上下文只用于帮助理解，不要泄露系统字段，不要逐字复述，也不要编造用户没有说过的信息。',
     JSON.stringify(context, null, 2),
   ].join('\n\n')
+}
+
+const RECORD_CATEGORIES = ['journal', 'todo', 'weight', 'expense', 'exercise']
+
+function getExtractionSystemPrompt() {
+  return [
+    '你是 LifePilot 的结构化记录提取器。只从当前用户消息提取明确、可保存的生活事实；绝不与用户聊天。',
+    '只输出一个合法 JSON 对象，格式必须是 {"records":[{"category":"journal|todo|weight|expense|exercise"}]}。不要 Markdown、解释、额外字段或自然语言。',
+    'expense：用户明确说了消费、购买或金额；weight：明确体重；exercise：明确运动事实；todo：明确要做、提醒、日程或承诺；journal：用户明确要求记录/写日记，或清楚地陈述一段希望保存的生活事实。',
+    '普通闲聊、抱怨、发泄、求建议、对 AI 的反馈、没有明确记录意图的情绪表达都返回 {"records":[]}。不要把“今天好累”“不想上班”“被领导骂了”自动变成记录。',
+    '只使用用户明确说出的事实。不得猜测金额、日期、原因、人物、情绪、动机或医疗信息。不得把抱怨自动变成 Todo。',
+    '默认只处理当前用户消息；不要引用聊天历史、长期记忆、人格设置或回复风格。',
+  ].join('\n')
+}
+
+function buildExtractionPrompt(payload) {
+  const context = {
+    text: payload.text,
+    date: payload.recordContext?.date,
+  }
+
+  return JSON.stringify(context, null, 2)
+}
+
+function parseJsonObject(content) {
+  if (typeof content !== 'string') return null
+
+  const trimmed = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function inferTodoDueDate(text, date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) return undefined
+  if (!text.includes('明天') && !text.includes('今天')) return undefined
+
+  const dueDate = new Date(`${date}T12:00:00`)
+  if (text.includes('明天')) dueDate.setDate(dueDate.getDate() + 1)
+  return dueDate.toISOString().slice(0, 10)
+}
+
+function generateRecordTags(text, category) {
+  const tagRules = [
+    ['疲惫', ['累', '疲惫', '困', '没精神']],
+    ['睡眠', ['睡觉', '熬夜', '失眠', '睡眠']],
+    ['健康', ['医院', '体检', '身体', '疼', '病']],
+    ['学习', ['学习', '考试', '课程', '英语']],
+    ['工作', ['工作', '上班', '项目', '老板']],
+    ['消费', ['花了', '买了', '消费', '钱', '元', '块']],
+    ['运动', ['跑步', '健身', '运动', '公里', '步']],
+    ['计划', ['明天', '计划', '记得', '待办']],
+    ['情绪', ['难过', '焦虑', '烦', '心情不好']],
+  ]
+  const categoryTag = { todo: '计划', expense: '消费', exercise: '运动', weight: '健康' }
+  const tags = new Set()
+
+  for (const [tag, keywords] of tagRules) {
+    if (keywords.some((keyword) => text.includes(keyword))) tags.add(tag)
+  }
+  if (categoryTag[category]) tags.add(categoryTag[category])
+
+  return Array.from(tags)
+}
+
+function buildExtractedData(text, category) {
+  const number = text.match(/(\d+\.?\d*)/)?.[1]
+  if (!number) return undefined
+
+  if (category === 'weight') {
+    return { type: 'weight', value: Number(number), unit: text.includes('斤') && !text.includes('公斤') ? '斤' : 'kg' }
+  }
+  if (category === 'expense') return { type: 'expense', amount: Number(number), unit: text.includes('块') && !text.includes('元') ? '块' : '元' }
+  if (category === 'exercise') {
+    const activity = text.includes('跑步') ? '跑步' : text.includes('健身') ? '健身' : text.includes('走路') || text.includes('步') ? '走路' : '运动'
+    const unit = text.includes('步') && !text.includes('跑步') && !text.includes('公里') ? '步' : text.toLowerCase().includes('km') ? 'km' : '公里'
+    return { type: 'exercise', activity, value: Number(number), unit }
+  }
+  return undefined
+}
+
+function normalizeExtractedRecords(payload, extraction) {
+  const sourceRecords = Array.isArray(extraction?.records) ? extraction.records : []
+  const text = payload.text.trim()
+  const fallbackCreatedAt = new Date().toISOString()
+  const recordContext = payload.recordContext && typeof payload.recordContext === 'object' ? payload.recordContext : {}
+  const createdAt = typeof recordContext.createdAt === 'string' && !Number.isNaN(Date.parse(recordContext.createdAt))
+    ? recordContext.createdAt
+    : fallbackCreatedAt
+  const date = typeof recordContext.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(recordContext.date)
+    ? recordContext.date
+    : createdAt.slice(0, 10)
+  const baseId = Number.isSafeInteger(recordContext.id) ? recordContext.id : Date.now()
+  const seenCategories = new Set()
+
+  return sourceRecords.slice(0, 3).flatMap((item, index) => {
+    const category = item && typeof item === 'object' ? item.category : undefined
+    if (!RECORD_CATEGORIES.includes(category) || seenCategories.has(category)) return []
+    seenCategories.add(category)
+
+    const record = {
+      id: baseId + index,
+      text,
+      category,
+      createdAt,
+      date,
+      tags: generateRecordTags(text, category),
+      ...(category === 'todo' ? { completed: false } : {}),
+    }
+    const dueDate = category === 'todo' ? inferTodoDueDate(text, date) : undefined
+    const extracted = buildExtractedData(text, category)
+
+    return [{
+      ...record,
+      ...(dueDate ? { dueDate } : {}),
+      ...(extracted ? { extracted } : {}),
+    }]
+  })
 }
 
 function applyReplySafeguard(payload, reply) {
@@ -234,7 +355,7 @@ function buildSummaryPrompt(payload) {
   ].join('\n\n')
 }
 
-async function askDeepSeek(payload) {
+async function requestDeepSeek({ messages, temperature, maxTokens, timeoutMs, responseFormat }) {
   const apiKey = process.env.DEEPSEEK_API_KEY
 
   if (!apiKey) {
@@ -242,7 +363,7 @@ async function askDeepSeek(payload) {
   }
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     const response = await fetch(DEEPSEEK_API_URL, {
@@ -253,18 +374,10 @@ async function askDeepSeek(payload) {
       },
       body: JSON.stringify({
         model: DEEPSEEK_MODEL,
-        temperature: 0.8,
-        max_tokens: normalizePreferences(payload.preferences).replyLength === 'short' ? 120 : 180,
-        messages: [
-          {
-            role: 'system',
-            content: getChatSystemPrompt(payload.preferences, payload.text, payload.category, payload.intent),
-          },
-          {
-            role: 'user',
-            content: buildUserPrompt(payload),
-          },
-        ],
+        temperature,
+        max_tokens: maxTokens,
+        ...(responseFormat ? { response_format: responseFormat } : {}),
+        messages,
       }),
       signal: controller.signal,
     })
@@ -273,16 +386,85 @@ async function askDeepSeek(payload) {
       throw new Error(`DeepSeek request failed: ${response.status}`)
     }
 
-    const data = await response.json()
-    const reply = data?.choices?.[0]?.message?.content?.trim()
-
-    if (!reply) {
-      throw new Error('DeepSeek returned empty reply')
-    }
-
-    return applyReplySafeguard(payload, reply)
+    return response.json()
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+async function generateChatReply(payload) {
+  const data = await requestDeepSeek({
+    temperature: 0.8,
+    maxTokens: normalizePreferences(payload.preferences).replyLength === 'short' ? 120 : 180,
+    timeoutMs: 15000,
+    messages: [
+      {
+        role: 'system',
+        content: getChatSystemPrompt(payload.preferences, payload.text, payload.category, payload.intent),
+      },
+      {
+        role: 'user',
+        content: buildChatUserPrompt(payload),
+      },
+    ],
+  })
+  const reply = typeof data?.choices?.[0]?.message?.content === 'string'
+    ? data.choices[0].message.content.trim().slice(0, 1200)
+    : ''
+
+  if (!reply) {
+    throw new Error('DeepSeek returned empty reply')
+  }
+
+  return applyReplySafeguard(payload, reply)
+}
+
+async function extractRecords(payload) {
+  const data = await requestDeepSeek({
+    temperature: 0,
+    maxTokens: 180,
+    timeoutMs: 8000,
+    responseFormat: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: getExtractionSystemPrompt(),
+      },
+      {
+        role: 'user',
+        content: buildExtractionPrompt(payload),
+      },
+    ],
+  })
+  const extraction = parseJsonObject(data?.choices?.[0]?.message?.content)
+
+  if (!extraction) {
+    throw new Error('DeepSeek returned invalid extraction JSON')
+  }
+
+  return normalizeExtractedRecords(payload, extraction)
+}
+
+function logChatOperation(operation, status, durationMs, details = {}) {
+  const event = { operation, status, durationMs, ...details }
+
+  if (status === 'failure') {
+    console.warn('[LifePilot] chat operation failed', event)
+  } else if (process.env.NODE_ENV !== 'production') {
+    console.log('[LifePilot] chat operation succeeded', event)
+  }
+}
+
+async function runChatOperation(operation, task) {
+  const startedAt = Date.now()
+
+  try {
+    const result = await task()
+    logChatOperation(operation, 'success', Date.now() - startedAt, operation === 'extraction' ? { recordCount: result.length } : {})
+    return result
+  } catch (error) {
+    logChatOperation(operation, 'failure', Date.now() - startedAt)
+    throw error
   }
 }
 
@@ -387,16 +569,32 @@ app.post('/api/chat', async (req, res) => {
       return
     }
 
-    try {
-      const reply = await askDeepSeek(payload)
-      res.status(200).json({ reply, source: 'ai', model: DEEPSEEK_MODEL })
-    } catch {
-      const fallbackReply = typeof payload.fallbackReply === 'string' && payload.fallbackReply.trim()
+    const [chatResult, extractionResult] = await Promise.allSettled([
+      runChatOperation('chat', () => generateChatReply(payload)),
+      runChatOperation('extraction', () => extractRecords(payload)),
+    ])
+    const chatSucceeded = chatResult.status === 'fulfilled'
+    const reply = chatSucceeded
+      ? chatResult.value
+      : typeof payload.fallbackReply === 'string' && payload.fallbackReply.trim()
         ? payload.fallbackReply.trim()
         : '我在。先帮你把这句话接住，等会儿我们再慢慢整理。'
+    const records = extractionResult.status === 'fulfilled' ? extractionResult.value : []
 
-      res.status(200).json({ reply: fallbackReply, source: 'fallback' })
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[LifePilot] chat request completed', {
+        chatSource: chatSucceeded ? 'ai' : 'fallback',
+        extractionSource: extractionResult.status === 'fulfilled' ? 'ai' : 'empty',
+        recordCount: records.length,
+      })
     }
+
+    res.status(200).json({
+      reply,
+      records,
+      source: chatSucceeded ? 'ai' : 'fallback',
+      ...(chatSucceeded ? { model: DEEPSEEK_MODEL } : {}),
+    })
   } catch {
     res.status(502).json({ error: 'AI reply failed' })
   }
