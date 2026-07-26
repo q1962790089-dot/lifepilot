@@ -284,12 +284,30 @@ function getWechatStartRecordError(response: WechatSdkResponse) {
     : '微信录音启动失败，请稍后重试。'
 }
 
+function getWechatStopRecordError(response?: WechatSdkResponse) {
+  const error = typeof response?.errMsg === 'string' ? response.errMsg.trim().toLowerCase() : ''
+  const reason = error
+    .replace(/^stoprecord:fail/i, '')
+    .replace(/^[\s,:;._-]+|[\s,:;._-]+$/g, '')
+
+  if (/require subscribe/.test(reason)) return '请先关注当前微信测试公众号，关注后再试。'
+  if (/too short|short time/.test(reason)) return '录音时间太短，请说完后再停止。'
+  if (/permission|authorize|authorise|access denied|forbidden|deny/.test(reason)) {
+    return '微信麦克风权限未开启，请到 iPhone“设置 > 微信 > 麦克风”中打开。'
+  }
+  const safeReason = reason.replace(/\p{Cc}/gu, '').slice(0, 60)
+  return safeReason
+    ? `微信录音停止失败（${safeReason}）`
+    : '微信录音停止失败，请重新说一次。'
+}
+
 async function createWechatVoiceSession(config: VoiceConfig, callbacks: VoiceCallbacks): Promise<VoiceSession> {
   if (!config.available) throw new Error('微信语音尚未配置完成，请稍后再试。')
 
   const wx = await prepareWechatVoice()
   const startedAt = Date.now()
   let recording = true
+  let stopRequested = false
   let processing = false
   let settled = false
   let cancelled = false
@@ -330,27 +348,54 @@ async function createWechatVoiceSession(config: VoiceConfig, callbacks: VoiceCal
     complete: (response) => {
       if (!recording || settled || cancelled) return
       recording = false
+      stopRequested = false
       translate(response.localId)
     },
   })
 
+  const stopRecording = (attempt = 0, lastError?: WechatSdkResponse) => {
+    if (!recording || settled || cancelled) return
+
+    let callbackReceived = false
+    const retryOrFail = (response?: WechatSdkResponse) => {
+      if (callbackReceived || settled || cancelled) return
+      callbackReceived = true
+      window.clearTimeout(callbackTimeout)
+
+      if (attempt < 5) {
+        window.setTimeout(() => stopRecording(attempt + 1, response ?? lastError), 300)
+        return
+      }
+
+      stopRequested = false
+      fail(getWechatStopRecordError(response ?? lastError))
+    }
+    const callbackTimeout = window.setTimeout(() => retryOrFail(lastError), 500)
+
+    wx.stopRecord({
+      success: (response) => {
+        if (callbackReceived || settled || cancelled) return
+        callbackReceived = true
+        window.clearTimeout(callbackTimeout)
+        recording = false
+        stopRequested = false
+        processing = false
+        translate(response.localId)
+      },
+      fail: (response) => retryOrFail(response),
+    })
+  }
+
   const session: VoiceSession = {
     stop() {
-      if (!recording || settled || cancelled) return
-      recording = false
-      const stopRecording = () => {
-        if (settled || cancelled) return
-        wx.stopRecord({
-          success: (response) => {
-            processing = false
-            translate(response.localId)
-          },
-          fail: () => fail('微信录音停止失败，请重新说一次。'),
-        })
-      }
+      if (!recording || stopRequested || settled || cancelled) return
+      stopRequested = true
       const remainingMinimumDuration = Math.max(0, 1000 - (Date.now() - startedAt))
-      if (remainingMinimumDuration > 0) window.setTimeout(stopRecording, remainingMinimumDuration)
-      else stopRecording()
+      if (remainingMinimumDuration > 0) {
+        window.setTimeout(() => stopRecording(), remainingMinimumDuration)
+      } else {
+        stopRecording()
+      }
     },
     cancel() {
       if (settled || cancelled) return
