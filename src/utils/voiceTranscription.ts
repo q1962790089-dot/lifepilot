@@ -261,10 +261,23 @@ function getVoiceErrorMessage(error: string) {
   return '语音识别失败，请重试或使用文字输入。'
 }
 
+function getWechatStartRecordError(response: WechatSdkResponse) {
+  const error = typeof response.errMsg === 'string' ? response.errMsg.trim().toLowerCase() : ''
+  const isIosWechat = /iphone|ipad|ipod/i.test(navigator.userAgent)
+
+  if (isIosWechat && (error === '' || error === 'startrecord:fail')) return null
+  if (/not support|unsupported/.test(error)) return '当前微信版本不支持网页录音，请升级微信后重试。'
+  if (/permission|authorize|authorise|access denied|forbidden|deny/.test(error)) {
+    return '微信麦克风权限未开启，请到 iPhone“设置 > 微信 > 麦克风”中打开。'
+  }
+  return '微信录音启动失败，请重新打开页面后重试。'
+}
+
 async function createWechatVoiceSession(config: VoiceConfig, callbacks: VoiceCallbacks): Promise<VoiceSession> {
   if (!config.available) throw new Error('微信语音尚未配置完成，请稍后再试。')
 
   const wx = await prepareWechatVoice()
+  const startedAt = Date.now()
   let recording = true
   let processing = false
   let settled = false
@@ -314,13 +327,19 @@ async function createWechatVoiceSession(config: VoiceConfig, callbacks: VoiceCal
     stop() {
       if (!recording || settled || cancelled) return
       recording = false
-      wx.stopRecord({
-        success: (response) => {
-          processing = false
-          translate(response.localId)
-        },
-        fail: () => fail('微信录音停止失败，请重新说一次。'),
-      })
+      const stopRecording = () => {
+        if (settled || cancelled) return
+        wx.stopRecord({
+          success: (response) => {
+            processing = false
+            translate(response.localId)
+          },
+          fail: () => fail('微信录音停止失败，请重新说一次。'),
+        })
+      }
+      const remainingMinimumDuration = Math.max(0, 1000 - (Date.now() - startedAt))
+      if (remainingMinimumDuration > 0) window.setTimeout(stopRecording, remainingMinimumDuration)
+      else stopRecording()
     },
     cancel() {
       if (settled || cancelled) return
@@ -335,7 +354,10 @@ async function createWechatVoiceSession(config: VoiceConfig, callbacks: VoiceCal
 
   wx.startRecord({
     cancel: () => fail('需要在微信中允许录音后才能使用语音输入。'),
-    fail: () => fail('微信录音启动失败，请确认已允许麦克风权限。'),
+    fail: (response) => {
+      const message = getWechatStartRecordError(response)
+      if (message) fail(message)
+    },
   })
   callbacks.onListening()
   return session
