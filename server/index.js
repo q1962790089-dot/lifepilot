@@ -18,6 +18,11 @@ import {
   normalizeAudioContentType,
   requestCompatibleTranscription,
 } from './voiceTranscription.js'
+import {
+  createWechatJssdkService,
+  getWechatRuntimeConfig,
+  isWechatBrowser,
+} from './wechatJssdk.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions'
@@ -27,6 +32,8 @@ const __dirname = path.dirname(__filename)
 const distPath = path.resolve(__dirname, '../dist')
 const voiceConfig = getVoiceRuntimeConfig()
 const voiceRateLimiter = createMemoryRateLimiter()
+const wechatConfig = getWechatRuntimeConfig()
+const wechatJssdk = createWechatJssdkService(wechatConfig)
 
 function compactRecords(records) {
   if (!Array.isArray(records)) return []
@@ -619,8 +626,36 @@ const app = express()
 
 app.set('trust proxy', 1)
 
-app.get('/api/voice-config', (_req, res) => {
-  res.status(200).json(getPublicVoiceConfig(voiceConfig))
+app.get('/api/voice-config', (req, res) => {
+  res.status(200).json(getPublicVoiceConfig(voiceConfig, {
+    isWechat: isWechatBrowser(req.get('user-agent')),
+    wechatConfigured: wechatConfig.configured,
+  }))
+})
+
+app.get('/api/wechat-jssdk-signature', async (req, res) => {
+  try {
+    const signature = await wechatJssdk.getSignature(req.query.url)
+    res.set('Cache-Control', 'no-store')
+    res.status(200).json(signature)
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ''
+
+    if (code === 'WECHAT_NOT_CONFIGURED') {
+      res.status(503).json({ error: 'WeChat voice is not configured' })
+      return
+    }
+
+    if (code === 'WECHAT_INVALID_PAGE_URL') {
+      res.status(400).json({ error: 'Invalid page URL' })
+      return
+    }
+
+    console.warn('[LifePilot] WeChat JS-SDK signature failed', {
+      reason: code === 'WECHAT_TOKEN_FAILED' ? 'token_error' : 'ticket_error',
+    })
+    res.status(502).json({ error: 'WeChat JS-SDK initialization failed' })
+  }
 })
 
 app.post(

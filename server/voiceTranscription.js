@@ -36,11 +36,15 @@ export function getVoiceRuntimeConfig(env = process.env) {
   }
 }
 
-export function getPublicVoiceConfig(config) {
+export function getPublicVoiceConfig(config, { isWechat = false, wechatConfigured = false } = {}) {
+  const provider = isWechat ? 'wechat' : config.provider
+
   return {
-    provider: config.provider,
+    provider,
     language: config.language,
-    available: config.provider === 'browser' || config.apiConfigured,
+    available: provider === 'wechat'
+      ? wechatConfigured
+      : provider === 'browser' || config.apiConfigured,
     maxAudioBytes: config.maxAudioBytes,
     maxDurationSeconds: config.maxDurationSeconds,
   }

@@ -35,6 +35,26 @@ test('public voice config never exposes API credentials', () => {
   assert.equal('apiUrl' in publicConfig, false)
 })
 
+test('uses the WeChat voice provider only inside configured WeChat', () => {
+  const config = getVoiceRuntimeConfig({})
+
+  assert.deepEqual(getPublicVoiceConfig(config, {
+    isWechat: true,
+    wechatConfigured: true,
+  }), {
+    provider: 'wechat',
+    language: 'zh-CN',
+    available: true,
+    maxAudioBytes: 8 * 1024 * 1024,
+    maxDurationSeconds: 60,
+  })
+  assert.equal(getPublicVoiceConfig(config, {
+    isWechat: true,
+    wechatConfigured: false,
+  }).available, false)
+  assert.equal(getPublicVoiceConfig(config).provider, 'browser')
+})
+
 test('accepts supported audio MIME parameters and rejects other uploads', () => {
   assert.equal(normalizeAudioContentType('audio/webm;codecs=opus'), 'audio/webm')
   assert.equal(normalizeAudioContentType('audio/mp4'), 'audio/mp4')

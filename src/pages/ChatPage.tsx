@@ -8,6 +8,7 @@ import type { MessageTimeContext } from '../utils/messageTimeContext'
 import {
   isBrowserSpeechSupported,
   loadVoiceConfig,
+  prepareVoiceTranscription,
   startVoiceTranscription,
 } from '../utils/voiceTranscription'
 import type {
@@ -391,8 +392,22 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
 
   useEffect(() => {
     let active = true
-    loadVoiceConfig().then((config) => {
-      if (active) setVoiceConfig(config)
+    loadVoiceConfig().then(async (config) => {
+      if (!active) return
+      setVoiceConfig(config)
+
+      if (config.provider === 'wechat' && !config.available) {
+        setVoiceError('微信语音尚未配置完成，请稍后再试。')
+        return
+      }
+
+      try {
+        await prepareVoiceTranscription(config)
+      } catch (error) {
+        if (active) {
+          setVoiceError(error instanceof Error ? error.message : '微信语音初始化失败，请稍后重试。')
+        }
+      }
     })
 
     return () => {

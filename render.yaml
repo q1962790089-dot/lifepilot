@@ -15,3 +15,9 @@ services:
         sync: false
       - key: VOICE_TRANSCRIPTION_PROVIDER
         value: browser
+      - key: WECHAT_APP_ID
+        sync: false
+      - key: WECHAT_APP_SECRET
+        sync: false
+      - key: WECHAT_JS_DOMAIN
+        value: lifepilot-m4xr.onrender.com

@@ -1,4 +1,4 @@
-export type VoiceProvider = 'browser' | 'api'
+export type VoiceProvider = 'browser' | 'api' | 'wechat'
 
 export type VoiceState = 'idle' | 'listening' | 'transcribing'
 
@@ -59,13 +59,66 @@ interface SpeechRecognitionLike {
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
+interface WechatSdkResponse {
+  errMsg?: string
+}
+
+interface WechatLocalVoiceResponse extends WechatSdkResponse {
+  localId?: string
+}
+
+interface WechatTranslateVoiceResponse extends WechatSdkResponse {
+  translateResult?: string
+}
+
+interface WechatSdk {
+  config: (options: {
+    debug: boolean
+    appId: string
+    timestamp: number
+    nonceStr: string
+    signature: string
+    jsApiList: string[]
+  }) => void
+  ready: (callback: () => void) => void
+  error: (callback: (response: WechatSdkResponse) => void) => void
+  startRecord: (options: {
+    success?: () => void
+    cancel?: () => void
+    fail?: (response: WechatSdkResponse) => void
+  }) => void
+  stopRecord: (options: {
+    success: (response: WechatLocalVoiceResponse) => void
+    fail?: (response: WechatSdkResponse) => void
+  }) => void
+  onVoiceRecordEnd: (options: {
+    complete: (response: WechatLocalVoiceResponse) => void
+  }) => void
+  translateVoice: (options: {
+    localId: string
+    isShowProgressTips: 0 | 1
+    success: (response: WechatTranslateVoiceResponse) => void
+    fail?: (response: WechatSdkResponse) => void
+  }) => void
+}
+
+interface WechatSignatureConfig {
+  appId: string
+  timestamp: number
+  nonceStr: string
+  signature: string
+  jsApiList: string[]
+}
+
 declare global {
   interface Window {
     SpeechRecognition?: SpeechRecognitionConstructor
     webkitSpeechRecognition?: SpeechRecognitionConstructor
+    wx?: WechatSdk
   }
 }
 
+const WECHAT_SDK_URL = 'https://res.wx.qq.com/open/js/jweixin-1.6.0.js'
 const DEFAULT_CONFIG: VoiceConfig = {
   provider: 'browser',
   language: 'zh-CN',
@@ -73,6 +126,10 @@ const DEFAULT_CONFIG: VoiceConfig = {
   maxAudioBytes: 8 * 1024 * 1024,
   maxDurationSeconds: 60,
 }
+
+let wechatSdkPromise: Promise<WechatSdk> | null = null
+let wechatReadyPromise: Promise<WechatSdk> | null = null
+let wechatReadyUrl = ''
 
 function getSpeechRecognitionConstructor() {
   return window.SpeechRecognition ?? window.webkitSpeechRecognition
@@ -89,7 +146,7 @@ export async function loadVoiceConfig(): Promise<VoiceConfig> {
     const data = await response.json() as Partial<VoiceConfig>
 
     return {
-      provider: data.provider === 'api' ? 'api' : 'browser',
+      provider: data.provider === 'api' || data.provider === 'wechat' ? data.provider : 'browser',
       language: typeof data.language === 'string' ? data.language : DEFAULT_CONFIG.language,
       available: data.available !== false,
       maxAudioBytes: Number.isSafeInteger(data.maxAudioBytes) ? Number(data.maxAudioBytes) : DEFAULT_CONFIG.maxAudioBytes,
@@ -100,12 +157,188 @@ export async function loadVoiceConfig(): Promise<VoiceConfig> {
   }
 }
 
+function loadWechatSdk() {
+  if (window.wx) return Promise.resolve(window.wx)
+  if (wechatSdkPromise) return wechatSdkPromise
+
+  wechatSdkPromise = new Promise<WechatSdk>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${WECHAT_SDK_URL}"]`)
+    const script = existingScript ?? document.createElement('script')
+
+    const handleLoad = () => {
+      if (window.wx) resolve(window.wx)
+      else reject(new Error('微信语音组件加载失败，请稍后重试。'))
+    }
+    const handleError = () => reject(new Error('微信语音组件加载失败，请检查网络后重试。'))
+
+    script.addEventListener('load', handleLoad, { once: true })
+    script.addEventListener('error', handleError, { once: true })
+
+    if (!existingScript) {
+      script.src = WECHAT_SDK_URL
+      script.async = true
+      document.head.appendChild(script)
+    }
+  }).catch((error) => {
+    wechatSdkPromise = null
+    throw error
+  })
+
+  return wechatSdkPromise
+}
+
+async function loadWechatSignature(pageUrl: string) {
+  const response = await fetch(`/api/wechat-jssdk-signature?url=${encodeURIComponent(pageUrl)}`)
+
+  if (response.status === 503) throw new Error('微信语音尚未配置完成，请稍后再试。')
+  if (!response.ok) throw new Error('微信语音初始化失败，请从公众号菜单重新打开。')
+
+  const data = await response.json() as Partial<WechatSignatureConfig>
+  if (
+    typeof data.appId !== 'string'
+    || !Number.isSafeInteger(data.timestamp)
+    || typeof data.nonceStr !== 'string'
+    || typeof data.signature !== 'string'
+    || !Array.isArray(data.jsApiList)
+  ) {
+    throw new Error('微信语音初始化失败，请稍后重试。')
+  }
+
+  return data as WechatSignatureConfig
+}
+
+async function prepareWechatVoice() {
+  const pageUrl = window.location.href.split('#', 1)[0]
+  if (wechatReadyPromise && wechatReadyUrl === pageUrl) return wechatReadyPromise
+
+  wechatReadyUrl = pageUrl
+  wechatReadyPromise = (async () => {
+    const [wx, signature] = await Promise.all([
+      loadWechatSdk(),
+      loadWechatSignature(pageUrl),
+    ])
+
+    return new Promise<WechatSdk>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        reject(new Error('微信语音初始化超时，请重新打开页面后再试。'))
+      }, 12_000)
+
+      wx.ready(() => {
+        window.clearTimeout(timeout)
+        resolve(wx)
+      })
+      wx.error(() => {
+        window.clearTimeout(timeout)
+        reject(new Error('微信语音验证失败，请从公众号菜单重新打开。'))
+      })
+      wx.config({
+        debug: false,
+        appId: signature.appId,
+        timestamp: signature.timestamp,
+        nonceStr: signature.nonceStr,
+        signature: signature.signature,
+        jsApiList: signature.jsApiList,
+      })
+    })
+  })().catch((error) => {
+    wechatReadyPromise = null
+    wechatReadyUrl = ''
+    throw error
+  })
+
+  return wechatReadyPromise
+}
+
+export async function prepareVoiceTranscription(config: VoiceConfig) {
+  if (config.provider === 'wechat' && config.available) await prepareWechatVoice()
+}
+
 function getVoiceErrorMessage(error: string) {
   if (error === 'not-allowed' || error === 'service-not-allowed') return '需要允许麦克风权限才能使用语音输入。'
   if (error === 'no-speech') return '没有听清，请再说一次。'
   if (error === 'audio-capture') return '没有找到可用的麦克风。'
   if (error === 'network') return '语音识别网络异常，请稍后重试。'
   return '语音识别失败，请重试或使用文字输入。'
+}
+
+async function createWechatVoiceSession(config: VoiceConfig, callbacks: VoiceCallbacks): Promise<VoiceSession> {
+  if (!config.available) throw new Error('微信语音尚未配置完成，请稍后再试。')
+
+  const wx = await prepareWechatVoice()
+  let recording = true
+  let processing = false
+  let settled = false
+  let cancelled = false
+
+  const fail = (message: string) => {
+    if (settled || cancelled) return
+    settled = true
+    callbacks.onError(message)
+  }
+
+  const translate = (localId?: string) => {
+    if (settled || cancelled || processing) return
+    if (!localId) {
+      fail('微信没有返回录音，请重新说一次。')
+      return
+    }
+
+    processing = true
+    callbacks.onProcessing()
+    wx.translateVoice({
+      localId,
+      isShowProgressTips: 0,
+      success: (response) => {
+        if (settled || cancelled) return
+        const text = typeof response.translateResult === 'string' ? response.translateResult.trim() : ''
+        if (!text) {
+          fail('没有听清，请再说一次。')
+          return
+        }
+        settled = true
+        callbacks.onTranscript(text)
+      },
+      fail: () => fail('微信语音转写失败，请重试或使用文字输入。'),
+    })
+  }
+
+  wx.onVoiceRecordEnd({
+    complete: (response) => {
+      if (!recording || settled || cancelled) return
+      recording = false
+      translate(response.localId)
+    },
+  })
+
+  const session: VoiceSession = {
+    stop() {
+      if (!recording || settled || cancelled) return
+      recording = false
+      wx.stopRecord({
+        success: (response) => {
+          processing = false
+          translate(response.localId)
+        },
+        fail: () => fail('微信录音停止失败，请重新说一次。'),
+      })
+    },
+    cancel() {
+      if (settled || cancelled) return
+      cancelled = true
+      settled = true
+      if (recording) {
+        recording = false
+        wx.stopRecord({ success: () => undefined })
+      }
+    },
+  }
+
+  wx.startRecord({
+    cancel: () => fail('需要在微信中允许录音后才能使用语音输入。'),
+    fail: () => fail('微信录音启动失败，请确认已允许麦克风权限。'),
+  })
+  callbacks.onListening()
+  return session
 }
 
 function createBrowserVoiceSession(config: VoiceConfig, callbacks: VoiceCallbacks): VoiceSession {
@@ -269,6 +502,7 @@ async function createApiVoiceSession(config: VoiceConfig, callbacks: VoiceCallba
 }
 
 export async function startVoiceTranscription(config: VoiceConfig, callbacks: VoiceCallbacks): Promise<VoiceSession> {
+  if (config.provider === 'wechat') return createWechatVoiceSession(config, callbacks)
   if (config.provider === 'api') return createApiVoiceSession(config, callbacks)
   return createBrowserVoiceSession(config, callbacks)
 }
