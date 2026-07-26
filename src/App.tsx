@@ -9,6 +9,7 @@ import TimelinePage from './pages/TimelinePage'
 import { loadPreferences, PREFERENCES_CHANGED_EVENT, shouldShowOnboarding } from './utils/preferences'
 import { ACCENT_THEME } from './utils/theme'
 import type { LifePilotPreferences } from './types/preferences'
+import { useCloudSync } from './hooks/useCloudSync'
 
 type Tab = 'today' | 'chat' | 'timeline'
 type TimelineView = 'list' | 'charts'
@@ -20,6 +21,7 @@ const TABS: { key: Tab; label: string; icon: LucideIcon }[] = [
 ]
 
 function App() {
+  useCloudSync()
   const [activeTab, setActiveTab] = useState<Tab>(() => loadPreferences().layout.defaultTab)
   const [timelineView, setTimelineView] = useState<TimelineView>('list')
   const [showOnboarding, setShowOnboarding] = useState(() => shouldShowOnboarding())

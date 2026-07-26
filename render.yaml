@@ -21,3 +21,5 @@ services:
         sync: false
       - key: WECHAT_JS_DOMAIN
         value: lifepilot-m4xr.onrender.com
+      - key: DATABASE_URL
+        sync: false

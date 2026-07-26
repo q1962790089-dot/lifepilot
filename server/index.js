@@ -31,8 +31,16 @@ import {
   getSustainedLifeStateJournalText,
   hasIndependentRecordConnector,
   isIncompleteRecordText,
+  isLikelyQuestionText,
   isNegatedOrCancelledRecordText,
 } from './deterministicRecords.js'
+import { parseExpenseAmount } from './recordData.js'
+import {
+  createSyncStore,
+  getSyncRuntimeConfig,
+  normalizeSyncToken,
+  validateEncryptedSyncPayload,
+} from './syncStore.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions'
@@ -49,6 +57,9 @@ const voiceConfig = getVoiceRuntimeConfig()
 const voiceRateLimiter = createMemoryRateLimiter()
 const wechatConfig = getWechatRuntimeConfig()
 const wechatJssdk = createWechatJssdkService(wechatConfig)
+const syncConfig = getSyncRuntimeConfig()
+const syncStore = createSyncStore(syncConfig)
+const syncRateLimiter = createMemoryRateLimiter({ limit: 60, windowMs: 60_000 })
 
 function compactRecords(records) {
   if (!Array.isArray(records)) return []
@@ -315,13 +326,18 @@ function generateRecordTags(text, category) {
 
 function buildExtractedData(text, category) {
   const number = text.match(/(\d+\.?\d*)/)?.[1]
-  if (!number) return undefined
-
   if (category === 'weight') {
+    if (!number) return undefined
     return { type: 'weight', value: Number(number), unit: text.includes('斤') && !text.includes('公斤') ? '斤' : 'kg' }
   }
-  if (category === 'expense') return { type: 'expense', amount: Number(number), unit: text.includes('块') && !text.includes('元') ? '块' : '元' }
+  if (category === 'expense') {
+    const amount = parseExpenseAmount(text)
+    return amount === undefined
+      ? undefined
+      : { type: 'expense', amount, unit: text.includes('块') && !text.includes('元') ? '块' : '元' }
+  }
   if (category === 'exercise') {
+    if (!number) return undefined
     const activity = text.includes('跑步') ? '跑步' : text.includes('健身') ? '健身' : text.includes('走路') || text.includes('步') ? '走路' : '运动'
     const unit = text.includes('步') && !text.includes('跑步') && !text.includes('公里') ? '步' : text.toLowerCase().includes('km') ? 'km' : '公里'
     return { type: 'exercise', activity, value: Number(number), unit }
@@ -600,7 +616,7 @@ async function generateChatReply(payload) {
 }
 
 async function extractRecords(payload) {
-  if (isIncompleteRecordText(payload.text)) return []
+  if (payload.intent === 'question' || isIncompleteRecordText(payload.text) || isLikelyQuestionText(payload.text)) return []
 
   const deterministicExtraction = getDeterministicExtraction(payload.text, payload.category)
   const deterministicRecords = normalizeExtractedRecords(payload, deterministicExtraction)
@@ -863,6 +879,70 @@ app.use((error, req, res, next) => {
 
 app.use(express.json({ limit: '1mb' }))
 
+app.get('/api/sync-config', (_req, res) => {
+  res.status(200).json({ available: syncConfig.available })
+})
+
+app.use('/api/sync', (req, res, next) => {
+  if (!syncConfig.available) {
+    res.status(503).json({ error: 'Sync is not configured' })
+    return
+  }
+
+  const rateLimit = syncRateLimiter.check(req.ip)
+  if (!rateLimit.allowed) {
+    res.set('Retry-After', String(rateLimit.retryAfterSeconds))
+    res.status(429).json({ error: 'Too many sync requests' })
+    return
+  }
+
+  const token = normalizeSyncToken(req.get('authorization'))
+  if (!token) {
+    res.status(401).json({ error: 'Invalid sync token' })
+    return
+  }
+
+  res.locals.syncToken = token
+  next()
+})
+
+app.get('/api/sync', async (_req, res) => {
+  try {
+    const snapshot = await syncStore.read(res.locals.syncToken)
+    if (!snapshot) {
+      res.status(404).json({ error: 'No synced data' })
+      return
+    }
+    res.status(200).json(snapshot)
+  } catch {
+    res.status(503).json({ error: 'Sync database unavailable' })
+  }
+})
+
+app.put('/api/sync', async (req, res) => {
+  const payload = validateEncryptedSyncPayload(req.body?.payload)
+  if (!payload) {
+    res.status(400).json({ error: 'Invalid sync payload' })
+    return
+  }
+
+  try {
+    const result = await syncStore.write(res.locals.syncToken, payload)
+    res.status(200).json(result)
+  } catch {
+    res.status(503).json({ error: 'Sync database unavailable' })
+  }
+})
+
+app.delete('/api/sync', async (_req, res) => {
+  try {
+    await syncStore.remove(res.locals.syncToken)
+    res.status(204).end()
+  } catch {
+    res.status(503).json({ error: 'Sync database unavailable' })
+  }
+})
+
 function resolveRecordReferencePayload(payload) {
   const referencedText = getReferencedRecordText(payload.text, payload.messages)
   if (!referencedText) return payload
@@ -979,7 +1059,17 @@ app.get('/api/health', (_req, res) => {
   res.status(200).json({ ok: true })
 })
 
-app.use(express.static(distPath))
+app.use(express.static(distPath, {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store')
+      return
+    }
+    if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    }
+  },
+}))
 
 app.use((req, res) => {
   if (req.path.startsWith('/api/')) {
@@ -987,6 +1077,7 @@ app.use((req, res) => {
     return
   }
 
+  res.setHeader('Cache-Control', 'no-store')
   res.sendFile(path.join(distPath, 'index.html'))
 })
 

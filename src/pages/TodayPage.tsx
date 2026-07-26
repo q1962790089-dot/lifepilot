@@ -19,13 +19,15 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import PreferencesModal from '../components/PreferencesModal'
 import HomeLayoutEditor from '../components/HomeLayoutEditor'
-import { deleteRecord, getTodayRecords, toggleTodoCompleted, updateRecord } from '../utils/storage'
+import { deleteRecord, getTodayRecords, RECORDS_CHANGED_EVENT, toggleTodoCompleted, updateRecord } from '../utils/storage'
 import type { TodoScheduleUpdate } from '../utils/storage'
 import { CATEGORY_LABELS } from '../types/record'
 import type { LifeRecord, Category } from '../types/record'
 import type { HomeModuleId, LifePilotPreferences } from '../types/preferences'
 import { createScheduledAt, getLocalDateKey, getScheduleDate, getScheduledTime } from '../utils/todoSchedule'
 import { useTodoReminders } from '../hooks/useTodoReminders'
+import { notifyDataChanged } from '../utils/dataEvents'
+import { CLOUD_SYNC_APPLIED_EVENT } from '../utils/cloudSync'
 
 interface DailySummary {
   date: string
@@ -151,6 +153,7 @@ function saveStoredSummary(summary: DailySummary) {
   const summaries = loadDailySummaries()
   summaries[summary.date] = summary
   localStorage.setItem(SUMMARY_STORAGE_KEY, JSON.stringify(summaries))
+  notifyDataChanged('summaries')
 }
 
 function createFallbackSummary(records: LifeRecord[]) {
@@ -338,10 +341,14 @@ function TodayPage({ preferences, onOpenCharts }: { preferences: LifePilotPrefer
 
     refresh()
     window.addEventListener('focus', refresh)
+    window.addEventListener(RECORDS_CHANGED_EVENT, refresh)
+    window.addEventListener(CLOUD_SYNC_APPLIED_EVENT, refresh)
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       window.removeEventListener('focus', refresh)
+      window.removeEventListener(RECORDS_CHANGED_EVENT, refresh)
+      window.removeEventListener(CLOUD_SYNC_APPLIED_EVENT, refresh)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [currentDate])

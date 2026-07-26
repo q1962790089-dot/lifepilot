@@ -18,6 +18,8 @@ import type {
 } from '../utils/voiceTranscription'
 import type { LifePilotPreferences } from '../types/preferences'
 import type { Category, LifeRecord } from '../types/record'
+import { notifyDataChanged } from '../utils/dataEvents'
+import { CLOUD_SYNC_APPLIED_EVENT } from '../utils/cloudSync'
 
 type Intent = 'record' | 'chat' | 'question'
 
@@ -102,8 +104,11 @@ const CHAT_KEYWORDS = [
 const QUESTION_KEYWORDS = [
   '多少钱',
   '多少',
-  '是不是',
-  '有没有',
+  '能不能',
+  '可不可以',
+  '要不要',
+  '该不该',
+  '够不够',
   '为什么',
   '如何',
   '怎么回事',
@@ -114,10 +119,26 @@ const QUESTION_KEYWORDS = [
   '？',
 ]
 
+function isQuestionIntent(text: string) {
+  return includesAny(text, QUESTION_KEYWORDS)
+    || /(?:^|请问|想问|我想知道|你).{0,12}(?:什么|是否|是不是|有没有)/.test(text)
+}
+
 function loadMessages(): Message[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter((message): message is Message => (
+        message
+        && typeof message === 'object'
+        && typeof message.id === 'number'
+        && typeof message.text === 'string'
+        && (message.sender === 'user' || message.sender === 'ai')
+        && typeof message.time === 'string'
+      )).slice(-200)
+    }
   } catch {
     // Ignore invalid stored chat data and start fresh.
   }
@@ -125,7 +146,8 @@ function loadMessages(): Message[] {
 }
 
 function saveMessages(msgs: Message[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs.slice(-200)))
+  notifyDataChanged('messages')
 }
 
 function includesAny(text: string, keywords: string[]) {
@@ -134,7 +156,7 @@ function includesAny(text: string, keywords: string[]) {
 
 function getIntent(text: string): Intent {
   if (includesAny(text, CHAT_KEYWORDS)) return 'chat'
-  if (includesAny(text, QUESTION_KEYWORDS)) return 'question'
+  if (isQuestionIntent(text)) return 'question'
   return 'record'
 }
 
@@ -482,6 +504,12 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
+
+  useEffect(() => {
+    const refreshMessages = () => setMessages(loadMessages())
+    window.addEventListener(CLOUD_SYNC_APPLIED_EVENT, refreshMessages)
+    return () => window.removeEventListener(CLOUD_SYNC_APPLIED_EVENT, refreshMessages)
+  }, [])
 
   const sendMessage = async (textOverride?: string) => {
     const usesTypedInput = textOverride === undefined

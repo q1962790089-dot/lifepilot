@@ -9,6 +9,7 @@ import {
   PERSONALITY_GROUPS,
 } from '../utils/personalityRecommendation'
 import { getAddressText, loadPreferences, resetPreferences, savePreferences } from '../utils/preferences'
+import CloudSyncSettings from './CloudSyncSettings'
 
 interface PreferencesModalProps {
   open: boolean
@@ -189,8 +190,8 @@ function PreferencesModal({ open, onClose }: PreferencesModalProps) {
       <div className="max-h-full w-full overflow-y-auto rounded-3xl bg-white p-4 shadow-[0_20px_60px_rgba(15,23,42,0.18)] sm:max-w-lg">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-950">AI 交流设置</h2>
-            <p className="mt-1 text-xs leading-relaxed text-gray-400">只调整表达风格，不会影响你的记录和历史数据。</p>
+            <h2 className="text-lg font-semibold text-gray-950">设置</h2>
+            <p className="mt-1 text-xs leading-relaxed text-gray-400">调整交流风格，也可以连接你的其他设备。</p>
           </div>
           <button
             onClick={onClose}
@@ -278,12 +279,6 @@ function PreferencesModal({ open, onClose }: PreferencesModalProps) {
                 {draft.selfReportedPersonalityType ? '修改类型' : '重新获取推荐'}
               </button>
               <button
-                onClick={() => setShowPersonalityPicker(true)}
-                className="rounded-full bg-white px-3 py-2 text-xs font-medium text-gray-600 ring-1 ring-black/5"
-              >
-                重新获取推荐
-              </button>
-              <button
                 onClick={handleClearPersonality}
                 className="rounded-full bg-white px-3 py-2 text-xs font-medium text-gray-400 ring-1 ring-black/5"
               >
@@ -340,6 +335,8 @@ function PreferencesModal({ open, onClose }: PreferencesModalProps) {
             <p className="text-xs font-medium text-gray-400">预览：“今天有点累。”</p>
             <p className="mt-2 text-sm leading-relaxed text-gray-700">{preview}</p>
           </section>
+
+          <CloudSyncSettings />
         </div>
 
         {savedMessage && (

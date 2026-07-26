@@ -1,5 +1,6 @@
 import type { LifePilotPreferences } from '../types/preferences'
 import { createRecommendedLayout, normalizeHomeLayout } from './homeLayout'
+import { notifyDataChanged } from './dataEvents'
 
 const PREFERENCES_KEY = 'lifepilot_preferences'
 const ONBOARDING_COMPLETED_KEY = 'lifepilot_onboarding_completed'
@@ -95,6 +96,7 @@ export function savePreferences(preferences: LifePilotPreferences) {
   const next = normalizePreferences(preferences)
   localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next))
   window.dispatchEvent(new CustomEvent(PREFERENCES_CHANGED_EVENT, { detail: next }))
+  notifyDataChanged('preferences')
 
   if (import.meta.env.DEV) {
     console.log('LifePilot preferences applied:', next)
@@ -125,6 +127,7 @@ export function shouldShowOnboarding() {
 export function completeOnboarding(preferences: LifePilotPreferences) {
   savePreferences(preferences)
   localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true')
+  notifyDataChanged('onboarding')
 }
 
 export function resetPreferences() {

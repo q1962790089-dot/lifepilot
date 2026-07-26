@@ -2,8 +2,11 @@ import type { Category, LifeRecord } from '../types/record'
 import { inferTodoDueDate } from './dueDate'
 import { generateTags } from './tags'
 import { getLocalDateKey } from './todoSchedule'
+import { notifyDataChanged } from './dataEvents'
 
 const RECORDS_KEY = 'lifepilot_records'
+export const RECORDS_CHANGED_EVENT = 'lifepilot:records-changed'
+const RECORD_TOMBSTONES_KEY = 'lifepilot_record_tombstones'
 const SCHEDULE_FIELDS = ['scheduledAt', 'timePrecision', 'hasExplicitTime', 'reminderEnabled', 'reminderAt', 'remindedAt', 'timeZone', 'sourceTimeText'] as const
 
 export type TodoScheduleUpdate = Partial<Pick<LifeRecord,
@@ -60,7 +63,21 @@ function normalizeRecord(record: LifeRecord): LifeRecord {
 export function loadRecords(): LifeRecord[] {
   try {
     const raw = localStorage.getItem(RECORDS_KEY)
-    if (raw) return JSON.parse(raw).map(normalizeRecord)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed
+        .filter((record): record is LifeRecord => (
+          record
+          && typeof record === 'object'
+          && typeof record.id === 'number'
+          && typeof record.text === 'string'
+          && typeof record.category === 'string'
+          && typeof record.createdAt === 'string'
+          && typeof record.date === 'string'
+        ))
+        .map(normalizeRecord)
+    }
   } catch {
     // Ignore invalid stored records and start fresh.
   }
@@ -69,10 +86,21 @@ export function loadRecords(): LifeRecord[] {
 
 export function saveRecords(records: LifeRecord[]) {
   localStorage.setItem(RECORDS_KEY, JSON.stringify(records.map(normalizeRecord)))
+  window.dispatchEvent(new Event(RECORDS_CHANGED_EVENT))
+  notifyDataChanged('records')
 }
 
 export function addRecord(record: LifeRecord): LifeRecord[] {
   const records = loadRecords()
+  try {
+    const tombstones = JSON.parse(localStorage.getItem(RECORD_TOMBSTONES_KEY) ?? '{}') as Record<string, string>
+    if (tombstones && typeof tombstones === 'object') {
+      delete tombstones[String(record.id)]
+      localStorage.setItem(RECORD_TOMBSTONES_KEY, JSON.stringify(tombstones))
+    }
+  } catch {
+    localStorage.removeItem(RECORD_TOMBSTONES_KEY)
+  }
   records.push(normalizeRecord({
     ...record,
     tags: record.tags ?? generateTags(record.text, record.category),
@@ -128,6 +156,16 @@ export function updateRecord(
 
 export function deleteRecord(id: number): LifeRecord[] {
   const records = loadRecords().filter((record) => record.id !== id)
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECORD_TOMBSTONES_KEY) ?? '{}') as unknown
+    const tombstones: Record<string, string> = parsed && typeof parsed === 'object'
+      ? parsed as Record<string, string>
+      : {}
+    tombstones[String(id)] = new Date().toISOString()
+    localStorage.setItem(RECORD_TOMBSTONES_KEY, JSON.stringify(tombstones))
+  } catch {
+    localStorage.setItem(RECORD_TOMBSTONES_KEY, JSON.stringify({ [String(id)]: new Date().toISOString() }))
+  }
   saveRecords(records)
   return records
 }

@@ -16,10 +16,12 @@ import {
 } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { deleteRecord, loadRecords, toggleTodoCompleted, updateRecord } from '../utils/storage'
+import { deleteRecord, loadRecords, RECORDS_CHANGED_EVENT, toggleTodoCompleted, updateRecord } from '../utils/storage'
 import { CATEGORY_LABELS } from '../types/record'
 import type { Category, LifeRecord } from '../types/record'
 import type { LifePilotPreferences } from '../types/preferences'
+import { parseExpenseAmount } from '../utils/expense'
+import { CLOUD_SYNC_APPLIED_EVENT } from '../utils/cloudSync'
 
 type SummaryPeriod = 'week' | 'month'
 type TimelineView = 'list' | 'charts'
@@ -294,7 +296,10 @@ function classifyExpense(text: string) {
 function ExpenseDonutChart({ records }: { records: LifeRecord[] }) {
   const expenseRecords = records.filter((record) => record.category === 'expense')
   const grouped = expenseRecords.reduce<Record<string, number>>((acc, record) => {
-    const amount = parseFirstNumber(record.text) ?? 1
+    const amount = record.extracted?.type === 'expense'
+      ? record.extracted.amount
+      : parseExpenseAmount(record.text)
+    if (amount === null) return acc
     const category = classifyExpense(record.text)
     acc[category] = (acc[category] ?? 0) + amount
     return acc
@@ -458,6 +463,16 @@ function TimelinePage({
   useEffect(() => {
     if (isObserver) setExpandedSummary('week')
   }, [isObserver])
+
+  useEffect(() => {
+    const refreshRecords = () => setRecords(loadRecords())
+    window.addEventListener(RECORDS_CHANGED_EVENT, refreshRecords)
+    window.addEventListener(CLOUD_SYNC_APPLIED_EVENT, refreshRecords)
+    return () => {
+      window.removeEventListener(RECORDS_CHANGED_EVENT, refreshRecords)
+      window.removeEventListener(CLOUD_SYNC_APPLIED_EVENT, refreshRecords)
+    }
+  }, [])
 
   const setView = (nextView: TimelineView) => {
     setViewState(nextView)

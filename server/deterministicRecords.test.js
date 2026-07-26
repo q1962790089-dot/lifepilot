@@ -9,6 +9,7 @@ import {
   hasIndependentRecordConnector,
   isClearTodoText,
   isIncompleteRecordText,
+  isLikelyQuestionText,
   isNegatedOrCancelledRecordText,
 } from './deterministicRecords.js'
 
@@ -74,6 +75,13 @@ test('does not create new records from cancelled or negated future actions', () 
   assert.equal(isClearTodoText('明天不去健身了'), false)
   assert.deepEqual(getDeterministicExtraction('明天不去健身了', 'todo'), { records: [] })
   assert.deepEqual(getDeterministicExtraction('明天不用买牛奶了', 'todo'), { records: [] })
+})
+
+test('does not turn questions about plans or exercise into records', () => {
+  assert.equal(isLikelyQuestionText('明天要不要去健身？'), true)
+  assert.deepEqual(getDeterministicExtraction('明天要不要去健身？', 'todo'), { records: [] })
+  assert.deepEqual(getDeterministicExtraction('跑步5公里够不够', 'exercise'), { records: [] })
+  assert.deepEqual(getDeterministicExtraction('今天体重没称', 'weight'), { records: [] })
 })
 
 test('ignores a leading speech connector when deciding whether one record needs AI splitting', () => {

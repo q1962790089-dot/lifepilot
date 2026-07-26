@@ -9,6 +9,17 @@ export function isIncompleteRecordText(text) {
     && /(?:然后|但是|不过|因为|所以|如果|要是)\s*$/.test(text.trim())
 }
 
+export function isLikelyQuestionText(text) {
+  if (typeof text !== 'string') return false
+
+  const normalized = text.trim()
+  if (getFlightItineraryDetails(normalized)) return false
+
+  return /[？?]\s*$/.test(normalized)
+    || /(?:多少|为什么|怎么回事|怎么做|如何|能不能|可不可以|要不要|该不该|够不够|统计|总结)/.test(normalized)
+    || /(?:^|请问|想问|我想知道|你).{0,12}(?:什么|是否|是不是|有没有)/.test(normalized)
+}
+
 export function isNegatedOrCancelledRecordText(text) {
   if (typeof text !== 'string') return false
 
@@ -225,6 +236,9 @@ export function getDeterministicExtraction(text, suggestedCategory) {
   if (isIncompleteRecordText(normalized)) {
     return { records: [] }
   }
+  if (isLikelyQuestionText(normalized)) {
+    return { records: [] }
+  }
   const flightItinerary = getFlightItineraryDetails(normalized)
   if (flightItinerary) {
     const departureLabel = `${flightItinerary.departurePeriod ?? ''}${flightItinerary.departureTime}${flightItinerary.approximateDeparture ? '多' : ''}`
@@ -292,10 +306,6 @@ export function getDeterministicExtraction(text, suggestedCategory) {
 
   if (/(?:帮我记|记一下|写进日记|日记[:：])/.test(normalized)) {
     return { records: [{ category: 'journal', text: normalized.replace(/[。！？!?]+$/g, '') }] }
-  }
-
-  if (['todo', 'weight', 'expense', 'exercise'].includes(suggestedCategory)) {
-    return { records: [{ category: suggestedCategory, text: normalized.replace(/[。！？!?]+$/g, '') }] }
   }
 
   return { records: [] }
