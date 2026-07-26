@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   getDeterministicExtraction,
+  getFlightItineraryDetails,
   getReferencedRecordText,
   isClearTodoText,
   isIncompleteRecordText,
@@ -108,4 +109,31 @@ test('does not save an unfinished spoken clause as a todo', () => {
     getDeterministicExtraction('呃我今天晚上会住酒店然后 因为', 'todo'),
     { records: [] },
   )
+})
+
+test('separates a flight itinerary from a later fixed class and ignores an uncertain stop', () => {
+  const text = '然后我7:00多的飞机到广州是9:00到了广州不确定会不会再去东莞到明天早上9:00有课'
+  assert.deepEqual(getFlightItineraryDetails(text), {
+    departureTime: '7:00',
+    approximateDeparture: true,
+    arrivalDestination: '广州',
+    arrivalTime: '9:00',
+    classTime: '9:00',
+    classSourceText: '明天早上9:00有课',
+    uncertainDestination: '东莞',
+  })
+  assert.deepEqual(getDeterministicExtraction(text, 'todo'), {
+    records: [
+      {
+        category: 'todo',
+        text: '乘7:00多的航班到广州（9:00到）',
+        sourceText: '晚点7:00乘航班到广州',
+      },
+      {
+        category: 'todo',
+        text: '上课',
+        sourceText: '明天早上9:00有课',
+      },
+    ],
+  })
 })

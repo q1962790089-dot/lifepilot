@@ -9,6 +9,24 @@ export function isIncompleteRecordText(text) {
     && /(?:然后|但是|不过|因为|所以|如果|要是)\s*$/.test(text.trim())
 }
 
+export function getFlightItineraryDetails(text) {
+  if (typeof text !== 'string') return undefined
+  const flight = text.match(/(\d{1,2}\s*[:：]\s*\d{2})\s*(多)?(?:的)?(?:飞机|航班).*?到([\u4e00-\u9fff]{2,8}?)(?:是|大约|约)?\s*(\d{1,2}\s*[:：]\s*\d{2})/)
+  const classPlan = text.match(/(?:明天早上|明早|明天)\s*(\d{1,2}\s*[:：]\s*\d{2}).*?(?:上课|有课)/)
+  if (!flight || !classPlan) return undefined
+
+  const uncertainDestination = text.match(/不确定.*?去([\u4e00-\u9fff]{2,8}?)(?=到?明天|因为|$)/)?.[1]
+  return {
+    departureTime: flight[1].replace(/\s+/g, '').replace('：', ':'),
+    approximateDeparture: Boolean(flight[2]),
+    arrivalDestination: flight[3],
+    arrivalTime: flight[4].replace(/\s+/g, '').replace('：', ':'),
+    classTime: classPlan[1].replace(/\s+/g, '').replace('：', ':'),
+    classSourceText: classPlan[0],
+    uncertainDestination,
+  }
+}
+
 export function isClearTodoText(text) {
   if (typeof text !== 'string') return false
   const normalized = text.trim()
@@ -137,6 +155,24 @@ export function getDeterministicExtraction(text, suggestedCategory) {
   const lower = normalized.toLowerCase()
   if (isIncompleteRecordText(normalized)) {
     return { records: [] }
+  }
+  const flightItinerary = getFlightItineraryDetails(normalized)
+  if (flightItinerary) {
+    const departureLabel = `${flightItinerary.departureTime}${flightItinerary.approximateDeparture ? '多' : ''}`
+    return {
+      records: [
+        {
+          category: 'todo',
+          text: `乘${departureLabel}的航班到${flightItinerary.arrivalDestination}（${flightItinerary.arrivalTime}到）`,
+          sourceText: `晚点${flightItinerary.departureTime}乘航班到${flightItinerary.arrivalDestination}`,
+        },
+        {
+          category: 'todo',
+          text: '上课',
+          sourceText: flightItinerary.classSourceText,
+        },
+      ],
+    }
   }
   const independentTodos = getIndependentTodoRecords(normalized)
 

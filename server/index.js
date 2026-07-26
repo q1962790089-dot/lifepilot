@@ -25,6 +25,7 @@ import {
 } from './wechatJssdk.js'
 import {
   getDeterministicExtraction,
+  getFlightItineraryDetails,
   getReferencedRecordText,
   isIncompleteRecordText,
 } from './deterministicRecords.js'
@@ -400,6 +401,16 @@ function formatSpokenClock(value) {
 }
 
 function createNaturalRecordReply(text, inferredCategory, isRecordingFollowUp = false, needsAlternative = false) {
+  const flightItinerary = getFlightItineraryDetails(text)
+  if (flightItinerary) {
+    const departure = formatSpokenClock(flightItinerary.departureTime)
+    const arrival = formatSpokenClock(flightItinerary.arrivalTime)
+    const classTime = formatSpokenClock(flightItinerary.classTime)
+    const uncertainStop = flightItinerary.uncertainDestination
+      ? `；之后去不去${flightItinerary.uncertainDestination}先不定`
+      : ''
+    return `好，${departure}${flightItinerary.approximateDeparture ? '多' : ''}的航班，${arrival}到${flightItinerary.arrivalDestination}${uncertainStop}，明早${classTime}还有课。`
+  }
   if (inferredCategory === 'todo' && /(飞机|航班)/.test(text)) {
     const times = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})/g)
       ?.map(formatSpokenClock) ?? []
@@ -429,6 +440,9 @@ function applyReplySafeguard(payload, reply) {
   const text = typeof payload.text === 'string' ? payload.text : ''
   if (isIncompleteRecordText(text)) {
     return '这句还没说完，你接着说就好。'
+  }
+  if (payload.intent === 'record' && getFlightItineraryDetails(text)) {
+    return createNaturalRecordReply(text, 'todo')
   }
   const inferredCategory = getDeterministicExtraction(text, payload.category).records[0]?.category ?? payload.category
   const isSolution = /(怎么(办|说|回复|选)|该怎么|应该怎么|帮我想办法|是不是我的错|谁的错|合不合理)/.test(text)

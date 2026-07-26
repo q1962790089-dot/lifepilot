@@ -232,6 +232,16 @@ function createFallbackReply(
 
   if (intent === 'record' && categories.length === 1) {
     if (firstCategory === 'todo' && /(飞机|航班)/.test(text)) {
+      const itinerary = text.match(/(\d{1,2}\s*[:：]\s*\d{2})\s*(多)?(?:的)?(?:飞机|航班).*?到([\u4e00-\u9fff]{2,8}?)(?:是|大约|约)?\s*(\d{1,2}\s*[:：]\s*\d{2})/)
+      const classPlan = text.match(/(?:明天早上|明早|明天)\s*(\d{1,2}\s*[:：]\s*\d{2}).*?(?:上课|有课)/)
+      if (itinerary && classPlan) {
+        const formatClock = (value: string) => value
+          .replace(/\s+/g, '')
+          .replace('：', ':')
+          .replace(/:00$/, '点')
+        const uncertainDestination = text.match(/不确定.*?去([\u4e00-\u9fff]{2,8}?)(?=到?明天|因为|$)/)?.[1]
+        return `好，${formatClock(itinerary[1])}${itinerary[2] ? '多' : ''}的航班，${formatClock(itinerary[4])}到${itinerary[3]}${uncertainDestination ? `；之后去不去${uncertainDestination}先不定` : ''}，明早${formatClock(classPlan[1])}还有课。`
+      }
       const times = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})/g)
         ?.map((value) => value
           .replace(/\s+/g, '')
