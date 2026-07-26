@@ -158,6 +158,7 @@ export function parseTodoTime(text, messageTimeContext) {
   const impliesUpcomingAction = /(?:晚点|待会儿?|一会儿?|等下|要|需要|得|准备|打算|出发|赶飞机)/.test(text)
   if (!parsed || !impliesUpcomingAction) return parsed
   if (/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)/.test(parsed.sourceTimeText)) return parsed
+  if (/(?:明天|明早|后天)/.test(text)) return parsed
   if (!isTimeValue(messageTimeContext?.localTime)) return parsed
 
   const [currentHour, currentMinute] = messageTimeContext.localTime.split(':').map(Number)

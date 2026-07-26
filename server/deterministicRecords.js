@@ -1,11 +1,14 @@
-const ACTION_PATTERN = /(?:去|出发|做|买|取|拿|送|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/
-const CLOCK_PATTERN = /(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})(?:点(?:钟|半)?|[:：]\d{2})/g
+const ACTION_PATTERN = /(?:去|出发|做|买|取|拿|送|订|定|上课|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/
+const CLOCK_SOURCE = '(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\\s*(?:十二|十一|十|[零一二两三四五六七八九]|\\d{1,2})(?:点(?:钟|半)?|[:：]\\d{2})'
+const CLOCK_PATTERN = new RegExp(CLOCK_SOURCE, 'g')
+const CLOCK_DETECTION_PATTERN = new RegExp(CLOCK_SOURCE)
+const RELATIVE_DATE_PATTERN = /(?:今天晚上|今天早上|今天上午|今天下午|今晚|今天|明天早上|明天上午|明天下午|明天晚上|明早|明天|后天)/
 
 export function isClearTodoText(text) {
   if (typeof text !== 'string') return false
   const normalized = text.trim()
   const hasAction = ACTION_PATTERN.test(normalized)
-  const hasExplicitPlan = /(?:记得|提醒我|待办|计划|要做|需要去|得去|准备去|打算去|我要去|我得|我需要)/.test(normalized)
+  const hasExplicitPlan = /(?:记得|提醒我|待办|计划|要做|需要去|得去|准备去|打算去|我要去|我得|我需要|可能要|还要)/.test(normalized)
   const hasLaterPlan = /(?:晚点|待会儿?|一会儿?|等下)/.test(normalized) && hasAction
   const hasFutureDay = /(?:今晚|明天|明早|后天)/.test(normalized) && hasAction
   const hasTodayPlan = /今天.*(?:要|需要|得|准备|打算|计划)/.test(normalized) && hasAction
@@ -23,12 +26,48 @@ function cleanTodoText(text) {
     return flightTime ? `出发赶${flightTime}的飞机` : '出发去机场'
   }
 
+  result = result.replace(/^(?:然后|接着|随后|并且|以及|再)\s*/, '')
   result = result.replace(/^(?:请)?(?:帮我)?(?:记得|提醒我|记一下|加个待办)\s*/, '')
   result = result.replace(/^我\s*/, '')
-  result = result.replace(/^(?:今天|今晚|明天|明早|后天|晚点|待会儿?|一会儿?|等下)\s*/, '')
-  result = result.replace(/^(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?\s*/, '')
-  result = result.replace(/^(?:要|需要|得|准备|打算|计划)\s*/, '')
+  result = result.replace(new RegExp(`^(?:${RELATIVE_DATE_PATTERN.source}|晚点|待会儿?|一会儿?|等下)\\s*`), '')
+  result = result.replace(/^(?:凌晨|早上|上午|中午|下午|晚上|傍晚)\s*/, '')
+  result = result.replace(/^(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})\s*/, '')
+  result = result.replace(/^(?:(?:还|也|可能)\s*)?(?:要|需要|得|准备|打算|计划)\s*/, '')
+  result = result.replace(/^定(?:个)?酒店/, '订酒店')
   return result || text.trim()
+}
+
+function getIndependentTodoRecords(text) {
+  if (!/(?:然后|并且|以及|接着|随后)/.test(text)) return []
+
+  const fragments = text
+    .split(/(?:然后|并且|以及|接着|随后)/)
+    .map((fragment) => fragment.trim().replace(/^[，,。；;]+|[，,。；;]+$/g, ''))
+    .filter(Boolean)
+  if (fragments.length < 2) return []
+
+  let inheritedDate = ''
+  const records = []
+
+  for (const fragment of fragments) {
+    const dateMatch = fragment.match(RELATIVE_DATE_PATTERN)?.[0]
+    if (dateMatch) inheritedDate = dateMatch
+    const hasAction = ACTION_PATTERN.test(fragment)
+    const hasPlanSignal = /(?:记得|提醒我|待办|计划|要|需要|得|准备|打算)/.test(fragment)
+      || Boolean(dateMatch)
+      || Boolean(inheritedDate)
+      || CLOCK_DETECTION_PATTERN.test(fragment)
+    if (!hasAction || !hasPlanSignal) continue
+
+    const sourceText = !dateMatch && inheritedDate ? `${inheritedDate}${fragment}` : fragment
+    records.push({
+      category: 'todo',
+      text: cleanTodoText(fragment),
+      sourceText,
+    })
+  }
+
+  return records.length > 1 ? records : []
 }
 
 export function getReferencedRecordText(text, messages) {
@@ -53,6 +92,11 @@ export function getDeterministicExtraction(text, suggestedCategory) {
 
   const normalized = text.trim()
   const lower = normalized.toLowerCase()
+  const independentTodos = getIndependentTodoRecords(normalized)
+
+  if (independentTodos.length > 1) {
+    return { records: independentTodos }
+  }
 
   if (isClearTodoText(normalized)) {
     return { records: [{ category: 'todo', text: cleanTodoText(normalized) }] }

@@ -87,4 +87,10 @@ test('treats a later bare spoken clock time as the upcoming PM time', () => {
     }),
     { time: '16:00', sourceTimeText: '4:00' },
   )
+  assert.deepEqual(
+    parseTodoTime('明天9:00还要上课', {
+      localTime: '12:41',
+    }),
+    { time: '09:00', sourceTimeText: '9:00' },
+  )
 })

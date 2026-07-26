@@ -34,3 +34,23 @@ test('resolves a record-follow-up to the previous user message', () => {
     records: [{ category: 'todo', text: '出发赶7:00的飞机' }],
   })
 })
+
+test('splits independent plans and keeps their own time context', () => {
+  assert.deepEqual(
+    getDeterministicExtraction('然后我今天晚上可能要定个酒店然后明天9:00还要上课', 'todo'),
+    {
+      records: [
+        {
+          category: 'todo',
+          text: '订酒店',
+          sourceText: '我今天晚上可能要定个酒店',
+        },
+        {
+          category: 'todo',
+          text: '上课',
+          sourceText: '明天9:00还要上课',
+        },
+      ],
+    },
+  )
+})

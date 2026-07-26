@@ -352,11 +352,14 @@ function normalizeExtractedRecords(payload, extraction) {
       tags: generateRecordTags(text, category),
       ...(category === 'todo' ? { completed: false } : {}),
     }
-    const parsedSourceTime = category === 'todo' ? parseTodoTime(sourceText, messageTimeContext) : undefined
+    const itemSourceText = item && typeof item === 'object' && typeof item.sourceText === 'string'
+      ? item.sourceText.trim()
+      : sourceText
+    const parsedSourceTime = category === 'todo' ? parseTodoTime(itemSourceText, messageTimeContext) : undefined
     const dueDate = category === 'todo'
       ? item && typeof item === 'object' && isDateKey(item.dueDate)
         ? item.dueDate
-        : inferTodoDueDate(sourceText, messageTimeContext) ?? (parsedSourceTime ? date : undefined)
+        : inferTodoDueDate(itemSourceText, messageTimeContext) ?? (parsedSourceTime ? date : undefined)
       : undefined
     const time = category === 'todo' && item && typeof item === 'object' && isTimeValue(item.time)
       ? item.time
@@ -555,7 +558,7 @@ async function extractRecords(payload) {
   const isSingleClearRecord = deterministicRecords.length === 1
     && !/[、，,；;]|\b(?:and|then)\b|并且|然后|以及/.test(payload.text)
 
-  if (isSingleClearRecord || isSingleFlightPlan) return deterministicRecords
+  if (deterministicRecords.length > 1 || isSingleClearRecord || isSingleFlightPlan) return deterministicRecords
 
   try {
     const data = await requestDeepSeek({
