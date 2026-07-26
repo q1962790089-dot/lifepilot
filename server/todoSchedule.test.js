@@ -6,6 +6,7 @@ import {
   isCurrentTimeQuestion,
   normalizeMessageTimeContext,
   parseExplicitTime,
+  parseTodoTime,
   resolveRelativeDate,
 } from './messageTime.js'
 
@@ -65,4 +66,19 @@ test('parses supported Chinese time expressions deterministically', () => {
   assert.deepEqual(parseExplicitTime('凌晨一点'), { time: '01:00', sourceTimeText: '凌晨一点' })
   assert.deepEqual(parseExplicitTime('上午十点'), { time: '10:00', sourceTimeText: '上午十点' })
   assert.deepEqual(parseExplicitTime('下午三点半'), { time: '15:30', sourceTimeText: '下午三点半' })
+})
+
+test('treats a later bare spoken clock time as the upcoming PM time', () => {
+  assert.deepEqual(
+    parseTodoTime('我晚点4点钟要去赶飞机', {
+      localTime: '12:03',
+    }),
+    { time: '16:00', sourceTimeText: '4点' },
+  )
+  assert.deepEqual(
+    parseTodoTime('我下午4点要去赶飞机', {
+      localTime: '12:03',
+    }),
+    { time: '16:00', sourceTimeText: '下午4点' },
+  )
 })

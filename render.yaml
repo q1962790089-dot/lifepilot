@@ -10,7 +10,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: DEEPSEEK_MODEL
-        value: deepseek-chat
+        value: deepseek-v4-flash
       - key: DEEPSEEK_API_KEY
         sync: false
       - key: VOICE_TRANSCRIPTION_PROVIDER

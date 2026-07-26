@@ -152,3 +152,24 @@ export function parseExplicitTime(text) {
   const time = `${String(hour).padStart(2, '0')}:${match[3] ? '30' : '00'}`
   return isTimeValue(time) ? { time, sourceTimeText: match[0] } : undefined
 }
+
+export function parseTodoTime(text, messageTimeContext) {
+  const parsed = parseExplicitTime(text)
+  if (!parsed || !/(?:晚点|待会儿?|一会儿?|等下)/.test(text)) return parsed
+  if (/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)/.test(parsed.sourceTimeText)) return parsed
+  if (!isTimeValue(messageTimeContext?.localTime)) return parsed
+
+  const [currentHour, currentMinute] = messageTimeContext.localTime.split(':').map(Number)
+  const [parsedHour, parsedMinute] = parsed.time.split(':').map(Number)
+  const currentMinutes = currentHour * 60 + currentMinute
+  const parsedMinutes = parsedHour * 60 + parsedMinute
+
+  if (parsedHour < 12 && parsedMinutes <= currentMinutes && parsedMinutes + 12 * 60 > currentMinutes) {
+    return {
+      ...parsed,
+      time: `${String(parsedHour + 12).padStart(2, '0')}:${String(parsedMinute).padStart(2, '0')}`,
+    }
+  }
+
+  return parsed
+}

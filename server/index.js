@@ -8,7 +8,7 @@ import {
   formatCurrentLocalTimeReply,
   isCurrentTimeQuestion,
   normalizeMessageTimeContext,
-  parseExplicitTime,
+  parseTodoTime,
   resolveRelativeDate,
 } from './messageTime.js'
 import {
@@ -23,10 +23,16 @@ import {
   getWechatRuntimeConfig,
   isWechatBrowser,
 } from './wechatJssdk.js'
+import { getDeterministicExtraction } from './deterministicRecords.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions'
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat'
+const configuredDeepSeekModel = process.env.DEEPSEEK_MODEL?.trim()
+const DEEPSEEK_MODEL = configuredDeepSeekModel === 'deepseek-chat'
+  ? 'deepseek-v4-flash'
+  : configuredDeepSeekModel === 'deepseek-reasoner'
+    ? 'deepseek-v4-flash'
+    : configuredDeepSeekModel || 'deepseek-v4-flash'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const distPath = path.resolve(__dirname, '../dist')
@@ -182,7 +188,8 @@ function getChatSystemPrompt(rawPreferences, currentText, category, intent, mess
     '不要公开解释对话策略，例如“现在先不分析”“等你气消再判断”“我正在认真倾听”。直接用自然的回应表现出来。',
     '普通回复保持短：record_only 1-2 句，casual/venting/comfort 通常 1-3 句；只有 solution 或 serious 按实际需要稍长。每次最多一个有意义的问题，也可以完全不问。',
     '历史上下文最多自然引用一条真正相关的细节；不要重复最近几轮已经提过的信息，不要用数据报告语气证明你记得。',
-    '记录由应用在对话外处理。你只负责自然回复，不要把“已记录”写成机械系统提示。',
+    '记录由应用在对话外处理。你只负责自然回复，不要把“已记录”写成机械系统提示，也不得用“记上了”“收到”“好的”单独敷衍。',
+    '对于明确计划，简短复述关键安排并补一句克制、实际的关心；例如赶飞机可以提醒路上留出余量。不要声称保存成功，也不要连续使用同一句模板。',
     `当前消息的不可变时间基准：用户本地日期 ${messageTimeContext.localDate}，本地时间 ${messageTimeContext.localTime}，时区 ${messageTimeContext.timeZone}，UTC 偏移 ${formatUtcOffset(messageTimeContext.utcOffsetMinutes)}。今天指 ${messageTimeContext.localDate}，明天指 ${addDaysToDateKey(messageTimeContext.localDate, 1)}，后天指 ${addDaysToDateKey(messageTimeContext.localDate, 2)}。涉及当前时间或相对日期时必须以此为准，不得猜测服务器时间或训练数据时间。`,
     '若用户在询问某个时间是否已过、是否迟到或距离现在多久，先用上述本地时间直接判断并说明结论；不要回避问题或把它改写成泛泛的情绪回应。',
     '输出前默默检查：是否给事实输入强加了情绪；是否用了上位者语言；是否为了续聊提出无意义问题；是否重复了上下文；是否能删掉一半而不损失意思。若是，重写后再输出。',
@@ -342,7 +349,7 @@ function normalizeExtractedRecords(payload, extraction) {
       tags: generateRecordTags(text, category),
       ...(category === 'todo' ? { completed: false } : {}),
     }
-    const parsedSourceTime = category === 'todo' ? parseExplicitTime(sourceText) : undefined
+    const parsedSourceTime = category === 'todo' ? parseTodoTime(sourceText, messageTimeContext) : undefined
     const dueDate = category === 'todo'
       ? item && typeof item === 'object' && isDateKey(item.dueDate)
         ? item.dueDate
@@ -380,12 +387,28 @@ function normalizeExtractedRecords(payload, extraction) {
 
 function applyReplySafeguard(payload, reply) {
   const text = typeof payload.text === 'string' ? payload.text : ''
+  const inferredCategory = getDeterministicExtraction(text, payload.category).records[0]?.category ?? payload.category
   const isSolution = /(怎么(办|说|回复|选)|该怎么|应该怎么|帮我想办法|是不是我的错|谁的错|合不合理)/.test(text)
     || payload.intent === 'question'
   const isSerious = /(家里人.*生病|家人.*生病|重病|去世|死亡|自杀|自伤|想死|不想活|暴力|威胁|崩溃)/.test(text)
   const isVenting = /(别分析|只想骂|就是想骂|领导|老板).*(骂|说|批评)?|被.*(骂|说|批评)/.test(text)
   const startsByAskingForContext = /^(先确认|先说说|把.+发给我|没头没尾|你先把|需要先了解)/.test(reply)
   const endsWithQuestion = /[？?]\s*$/.test(reply)
+  const isMechanicalRecordReply = /^(?:记上了|记下了|已记录|记录好了|收到|好的|好)[。！!]?$/.test(reply.trim())
+
+  if (payload.intent === 'record' && isMechanicalRecordReply) {
+    if (inferredCategory === 'todo' && /(飞机|航班)/.test(text)) {
+      const spokenTime = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?/)?.[0]
+        ?.replace('点钟', '点')
+        .trim()
+      return `好，${spokenTime ? `${spokenTime}要` : ''}赶飞机。路上多留点余量，别把自己卡得太紧。`
+    }
+    if (inferredCategory === 'todo') return '好，按这个安排来。到点前给自己留一点余量。'
+    if (inferredCategory === 'expense') return '这笔我看到了，之后回看账目时会更清楚。'
+    if (inferredCategory === 'weight') return '好，先看后面的连续趋势，不急着评价这一次。'
+    if (inferredCategory === 'exercise') return '今天这段运动算数，按自己的节奏来。'
+    return '嗯，我在听。你可以继续说，不用一次讲完整。'
+  }
 
   if (isSolution && startsByAskingForContext) {
     if (/(领导|老板)/.test(text)) {
@@ -486,29 +509,39 @@ async function generateChatReply(payload) {
 }
 
 async function extractRecords(payload) {
-  const data = await requestDeepSeek({
-    temperature: 0,
-    maxTokens: 180,
-    timeoutMs: 8000,
-    responseFormat: { type: 'json_object' },
-    messages: [
-      {
-        role: 'system',
-        content: getExtractionSystemPrompt(),
-      },
-      {
-        role: 'user',
-        content: buildExtractionPrompt(payload),
-      },
-    ],
-  })
-  const extraction = parseJsonObject(data?.choices?.[0]?.message?.content)
+  const deterministicExtraction = getDeterministicExtraction(payload.text, payload.category)
+  const deterministicRecords = normalizeExtractedRecords(payload, deterministicExtraction)
+  const isSingleClearRecord = deterministicRecords.length === 1
+    && !/[、，,；;]|\b(?:and|then)\b|并且|然后|以及/.test(payload.text)
 
-  if (!extraction) {
-    throw new Error('DeepSeek returned invalid extraction JSON')
+  if (isSingleClearRecord) return deterministicRecords
+
+  try {
+    const data = await requestDeepSeek({
+      temperature: 0,
+      maxTokens: 180,
+      timeoutMs: 8000,
+      responseFormat: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: getExtractionSystemPrompt(),
+        },
+        {
+          role: 'user',
+          content: buildExtractionPrompt(payload),
+        },
+      ],
+    })
+    const extraction = parseJsonObject(data?.choices?.[0]?.message?.content)
+
+    if (!extraction) throw new Error('DeepSeek returned invalid extraction JSON')
+    const aiRecords = normalizeExtractedRecords(payload, extraction)
+    return aiRecords.length > 0 ? aiRecords : deterministicRecords
+  } catch (error) {
+    if (deterministicRecords.length > 0) return deterministicRecords
+    throw error
   }
-
-  return normalizeExtractedRecords(payload, extraction)
 }
 
 function logChatOperation(operation, status, durationMs, details = {}) {

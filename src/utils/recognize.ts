@@ -24,7 +24,18 @@ const RULES: Rule[] = [
   },
 ]
 
+export function isLikelyTodo(text: string) {
+  const hasAction = /(?:去|做|买|取|拿|送|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/.test(text)
+  const hasExplicitPlan = /(?:记得|提醒我|待办|计划|要做|需要去|得去|准备去|打算去|我要去|我得|我需要)/.test(text)
+  const hasLaterPlan = /(?:晚点|待会儿?|一会儿?|等下)/.test(text) && hasAction
+  const hasFutureDay = /(?:今晚|明天|明早|后天)/.test(text) && hasAction
+  const hasTodayPlan = /今天.*(?:要|需要|得|准备|打算|计划)/.test(text) && hasAction
+  return hasExplicitPlan || hasLaterPlan || hasFutureDay || hasTodayPlan
+}
+
 export function recognize(text: string): Category {
+  if (isLikelyTodo(text)) return 'todo'
+
   for (const rule of RULES) {
     if (rule.keywords.some((kw) => text.includes(kw))) {
       return rule.category

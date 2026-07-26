@@ -144,6 +144,10 @@ function getReplyCategories(text: string): Category[] {
     const keywords = REPLY_KEYWORDS[category] ?? []
     return keywords.some((keyword) => normalized.includes(keyword.toLowerCase()))
   })
+  const recognizedCategory = recognize(text)
+  if (recognizedCategory !== 'journal' && !categories.includes(recognizedCategory)) {
+    categories.push(recognizedCategory)
+  }
 
   return categories.length > 0 ? categories : ['journal']
 }
@@ -227,11 +231,17 @@ function createFallbackReply(
   const firstCategory = categories[0]
 
   if (intent === 'record' && categories.length === 1) {
-    if (firstCategory === 'todo') return '记上了。'
-    if (firstCategory === 'expense') return '记上了。'
-    if (firstCategory === 'weight') return '记上了，先看趋势。'
-    if (firstCategory === 'exercise') return '记上了。'
-    if (firstCategory === 'journal') return '记上了。'
+    if (firstCategory === 'todo' && /(飞机|航班)/.test(text)) {
+      const spokenTime = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?/)?.[0]
+        ?.replace('点钟', '点')
+        .trim()
+      return `好，${spokenTime ? `${spokenTime}要` : ''}赶飞机。路上多留点余量，别把自己卡得太紧。`
+    }
+    if (firstCategory === 'todo') return '好，按这个安排来。到点前给自己留一点余量。'
+    if (firstCategory === 'expense') return '这笔我看到了，之后回看账目时会更清楚。'
+    if (firstCategory === 'weight') return '好，先看后面的连续趋势，不急着评价这一次。'
+    if (firstCategory === 'exercise') return '今天这段运动算数，按自己的节奏来。'
+    if (firstCategory === 'journal') return '嗯，我在听。你可以继续说，不用一次讲完整。'
   }
 
   if (preferences.persona === 'clear') {
