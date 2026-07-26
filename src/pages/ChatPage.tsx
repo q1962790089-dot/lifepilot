@@ -190,6 +190,12 @@ function createHumanFallbackReply(text: string, intent: Intent, preferences: Lif
   if (/(别分析|只想骂|就是想骂)/.test(normalized)) {
     return '行，你骂，我听着。'
   }
+  if (
+    /(?:接下来|未来|之后|往后).{0,8}(?:\d+|[一二两三四五六七八九十]+)(?:天|周|个?月|年)/.test(normalized)
+    && /(?:见不了身|健不了身|不能健身|没法健身|无法健身|运动不了|不能运动|没法运动|无法运动)/.test(normalized)
+  ) {
+    return '这两个月健身节奏可能要断一下了。先别勉强，等条件允许再慢慢接回来。'
+  }
   if (/(怎么(办|回复|说|选)|是不是我的错|谁的错|合不合理)/.test(normalized) || intent === 'question') {
     return direct
       ? '先别急着解释。把对方要你改的点、标准和时间确认清楚，最后把结论留成文字。'

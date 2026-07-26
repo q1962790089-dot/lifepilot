@@ -27,6 +27,7 @@ import {
   getDeterministicExtraction,
   getFlightItineraryDetails,
   getReferencedRecordText,
+  getSustainedLifeStateJournalText,
   isIncompleteRecordText,
 } from './deterministicRecords.js'
 
@@ -246,6 +247,7 @@ function getExtractionSystemPrompt() {
     '你是 LifePilot 的结构化记录提取器。只从当前用户消息提取明确、可保存的生活事实；绝不与用户聊天。',
     '只输出一个合法 JSON 对象，格式必须是 {"records":[{"category":"journal|todo|weight|expense|exercise","text":"简洁且完整的记录内容","dueDate":"YYYY-MM-DD，仅 todo 有明确日期时提供","time":"HH:mm，仅 todo 有明确钟点时提供","sourceTimeText":"原始时间表达，仅 todo 可选"}]}。records 始终是数组。不要 Markdown、解释、额外字段或自然语言。',
     'expense：用户明确说了消费、购买或金额；weight：明确体重；exercise：明确运动事实；todo：明确要做、提醒、日程或承诺；journal：用户明确要求记录/写日记，或清楚地陈述一段希望保存的生活事实。',
+    '持续一段明确时间的生活状态或限制可以保存为一条 journal；例如“未来两个月不能健身”是生活状态，不是已完成运动，不能保存为 exercise。',
     '普通闲聊、抱怨、发泄、求建议、对 AI 的反馈、没有明确记录意图的情绪表达都返回 {"records":[]}。不要把“今天好累”“不想上班”“被领导骂了”自动变成记录。',
     '一条消息可以输出零条、一条或多条 records。Todo 按“能否独立完成、勾选或取消”判断：多个独立任务分别输出多条 todo；不要把多个独立任务拼成一条，也不要只因逗号、并且、然后或再而机械拆分。',
     '购物例外：用户明确列举多个商品时，即使属于同一次购物，也要按商品拆成独立 todo，便于逐项勾选。保留共同地点和动作，例如“明天去超市买桃子、鸡蛋和西瓜”必须生成“去超市买桃子”“去超市买鸡蛋”“去超市买西瓜”。“买牙膏、洗发水和纸巾”也拆成三条。',
@@ -449,6 +451,9 @@ function applyReplySafeguard(payload, reply) {
   const text = typeof payload.text === 'string' ? payload.text : ''
   if (isIncompleteRecordText(text)) {
     return '这句还没说完，你接着说就好。'
+  }
+  if (getSustainedLifeStateJournalText(text)) {
+    return '这两个月健身节奏可能要断一下了。先别勉强，等条件允许再慢慢接回来。'
   }
   if (getFlightItineraryDetails(text)) {
     return createNaturalRecordReply(text, 'todo')

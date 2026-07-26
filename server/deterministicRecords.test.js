@@ -4,6 +4,7 @@ import {
   getDeterministicExtraction,
   getFlightItineraryDetails,
   getReferencedRecordText,
+  getSustainedLifeStateJournalText,
   isClearTodoText,
   isIncompleteRecordText,
 } from './deterministicRecords.js'
@@ -24,6 +25,35 @@ test('keeps clear health, expense, and exercise facts available when AI fails', 
 test('does not turn ordinary emotion or casual chat into a record', () => {
   assert.deepEqual(getDeterministicExtraction('今天好累。', 'journal'), { records: [] })
   assert.deepEqual(getDeterministicExtraction('为什么总是这样？', 'journal'), { records: [] })
+})
+
+test('stores a sustained exercise limitation as one journal record', () => {
+  assert.equal(
+    getSustainedLifeStateJournalText('然后我接下来两个月可能都见不了身了没有办法'),
+    '接下来两个月可能无法健身',
+  )
+  assert.deepEqual(
+    getDeterministicExtraction('然后我接下来两个月可能都见不了身了没有办法', 'journal'),
+    {
+      records: [
+        {
+          category: 'journal',
+          text: '接下来两个月可能无法健身',
+        },
+      ],
+    },
+  )
+  assert.deepEqual(
+    getDeterministicExtraction('接下来2个月不能健身', 'exercise'),
+    {
+      records: [
+        {
+          category: 'journal',
+          text: '接下来2个月无法健身',
+        },
+      ],
+    },
+  )
 })
 
 test('resolves a record-follow-up to the previous user message', () => {

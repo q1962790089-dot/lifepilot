@@ -162,6 +162,28 @@ export function getReferencedRecordText(text, messages) {
   return undefined
 }
 
+export function getSustainedLifeStateJournalText(text) {
+  if (typeof text !== 'string') return undefined
+
+  const repaired = text.trim().replace(/见不了身/g, '健不了身')
+  const hasDuration = /(?:接下来|未来|之后|往后).{0,8}(?:\d+|[一二两三四五六七八九十]+)(?:天|周|个?月|年)/.test(repaired)
+  const hasExerciseLimitation = /(?:健不了身|不能健身|没法健身|无法健身|运动不了|不能运动|没法运动|无法运动)/.test(repaired)
+  if (!hasDuration || !hasExerciseLimitation) return undefined
+
+  const journalText = repaired
+    .replace(/[。！？!?]+$/g, '')
+    .replace(/^(?:然后|接着|随后)\s*/, '')
+    .replace(/^我\s*/, '')
+    .replace(/可能(?:都)?(?:健不了身|不能健身|没法健身|无法健身)(?:了)?(?:没有办法|没办法)?/g, '可能无法健身')
+    .replace(/(?:健不了身|不能健身|没法健身|无法健身)(?:了)?(?:没有办法|没办法)?/g, '无法健身')
+    .replace(/可能(?:都)?(?:运动不了|不能运动|没法运动|无法运动)(?:了)?(?:没有办法|没办法)?/g, '可能无法运动')
+    .replace(/(?:运动不了|不能运动|没法运动|无法运动)(?:了)?(?:没有办法|没办法)?/g, '无法运动')
+    .replace(/(?:没有办法|没办法)$/g, '')
+    .trim()
+
+  return journalText || undefined
+}
+
 export function getDeterministicExtraction(text, suggestedCategory) {
   if (typeof text !== 'string' || !text.trim()) return { records: [] }
 
@@ -206,6 +228,11 @@ export function getDeterministicExtraction(text, suggestedCategory) {
 
   if (isClearTodoText(normalized)) {
     return { records: [{ category: 'todo', text: cleanTodoText(normalized) }] }
+  }
+
+  const sustainedLifeState = getSustainedLifeStateJournalText(normalized)
+  if (sustainedLifeState) {
+    return { records: [{ category: 'journal', text: sustainedLifeState }] }
   }
 
   if (/(?:体重|kg|公斤|斤)/i.test(lower) && /\d/.test(lower)) {
