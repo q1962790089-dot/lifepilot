@@ -4,6 +4,11 @@ const CLOCK_PATTERN = new RegExp(CLOCK_SOURCE, 'g')
 const CLOCK_DETECTION_PATTERN = new RegExp(CLOCK_SOURCE)
 const RELATIVE_DATE_PATTERN = /(?:今天晚上|今天早上|今天上午|今天下午|今晚|今天|明天早上|明天上午|明天下午|明天晚上|明早|明天|后天)/
 
+export function isIncompleteRecordText(text) {
+  return typeof text === 'string'
+    && /(?:然后|但是|不过|因为|所以|如果|要是)\s*$/.test(text.trim())
+}
+
 export function isClearTodoText(text) {
   if (typeof text !== 'string') return false
   const normalized = text.trim()
@@ -130,7 +135,7 @@ export function getDeterministicExtraction(text, suggestedCategory) {
 
   const normalized = text.trim()
   const lower = normalized.toLowerCase()
-  if (/(?:然后|但是|不过|因为|所以|如果|要是)\s*$/.test(normalized)) {
+  if (isIncompleteRecordText(normalized)) {
     return { records: [] }
   }
   const independentTodos = getIndependentTodoRecords(normalized)

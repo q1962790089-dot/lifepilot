@@ -4,6 +4,7 @@ import {
   getDeterministicExtraction,
   getReferencedRecordText,
   isClearTodoText,
+  isIncompleteRecordText,
 } from './deterministicRecords.js'
 
 test('recognizes a spoken future plan as a todo without AI', () => {
@@ -101,6 +102,8 @@ test('keeps destination context when splitting a conditional travel plan', () =>
 })
 
 test('does not save an unfinished spoken clause as a todo', () => {
+  assert.equal(isIncompleteRecordText('呃我今天晚上会住酒店然后 因为'), true)
+  assert.equal(isIncompleteRecordText('我今天晚上会住酒店'), false)
   assert.deepEqual(
     getDeterministicExtraction('呃我今天晚上会住酒店然后 因为', 'todo'),
     { records: [] },

@@ -26,6 +26,7 @@ import {
 import {
   getDeterministicExtraction,
   getReferencedRecordText,
+  isIncompleteRecordText,
 } from './deterministicRecords.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
@@ -426,6 +427,9 @@ function createNaturalRecordReply(text, inferredCategory, isRecordingFollowUp = 
 
 function applyReplySafeguard(payload, reply) {
   const text = typeof payload.text === 'string' ? payload.text : ''
+  if (isIncompleteRecordText(text)) {
+    return '这句还没说完，你接着说就好。'
+  }
   const inferredCategory = getDeterministicExtraction(text, payload.category).records[0]?.category ?? payload.category
   const isSolution = /(怎么(办|说|回复|选)|该怎么|应该怎么|帮我想办法|是不是我的错|谁的错|合不合理)/.test(text)
     || payload.intent === 'question'
@@ -558,6 +562,8 @@ async function generateChatReply(payload) {
 }
 
 async function extractRecords(payload) {
+  if (isIncompleteRecordText(payload.text)) return []
+
   const deterministicExtraction = getDeterministicExtraction(payload.text, payload.category)
   const deterministicRecords = normalizeExtractedRecords(payload, deterministicExtraction)
   const isSingleFlightPlan = deterministicRecords.length === 1
