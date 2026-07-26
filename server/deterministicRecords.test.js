@@ -54,3 +54,23 @@ test('splits independent plans and keeps their own time context', () => {
     },
   )
 })
+
+test('splits plans when a later date starts a new schedule without a connector', () => {
+  assert.deepEqual(
+    getDeterministicExtraction('对然后我有可能今天晚上会住酒店有可能赶去东莞因为我明天早上9:00还有课', 'todo'),
+    {
+      records: [
+        {
+          category: 'todo',
+          text: '入住酒店，可能赶去东莞',
+          sourceText: '我有可能今天晚上会住酒店有可能赶去东莞',
+        },
+        {
+          category: 'todo',
+          text: '上课',
+          sourceText: '明天早上9:00还有课',
+        },
+      ],
+    },
+  )
+})

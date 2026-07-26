@@ -1,4 +1,4 @@
-const ACTION_PATTERN = /(?:去|出发|做|买|取|拿|送|订|定|上课|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/
+const ACTION_PATTERN = /(?:去|出发|做|买|取|拿|送|订|定|上课|有课|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/
 const CLOCK_SOURCE = '(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\\s*(?:十二|十一|十|[零一二两三四五六七八九]|\\d{1,2})(?:点(?:钟|半)?|[:：]\\d{2})'
 const CLOCK_PATTERN = new RegExp(CLOCK_SOURCE, 'g')
 const CLOCK_DETECTION_PATTERN = new RegExp(CLOCK_SOURCE)
@@ -29,19 +29,49 @@ function cleanTodoText(text) {
   result = result.replace(/^(?:然后|接着|随后|并且|以及|再)\s*/, '')
   result = result.replace(/^(?:请)?(?:帮我)?(?:记得|提醒我|记一下|加个待办)\s*/, '')
   result = result.replace(/^我\s*/, '')
+  result = result.replace(/^(?:有可能|可能)\s*/, '')
   result = result.replace(new RegExp(`^(?:${RELATIVE_DATE_PATTERN.source}|晚点|待会儿?|一会儿?|等下)\\s*`), '')
   result = result.replace(/^(?:凌晨|早上|上午|中午|下午|晚上|傍晚)\s*/, '')
   result = result.replace(/^(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})\s*/, '')
-  result = result.replace(/^(?:(?:还|也|可能)\s*)?(?:要|需要|得|准备|打算|计划)\s*/, '')
+  result = result.replace(/^(?:(?:还|也|可能)\s*)?(?:要|需要|得|准备|打算|计划|会)\s*/, '')
   result = result.replace(/^定(?:个)?酒店/, '订酒店')
+  result = result.replace(/^住酒店/, '入住酒店')
+  result = result.replace(/有可能/g, '，可能')
+  if (result === '课' || result === '有课' || result === '还有课') result = '上课'
   return result || text.trim()
 }
 
+function splitOnDateChanges(fragment) {
+  const matches = Array.from(fragment.matchAll(new RegExp(RELATIVE_DATE_PATTERN.source, 'g')))
+  if (matches.length < 2) return [fragment]
+
+  const parts = []
+  let start = 0
+
+  for (const match of matches.slice(1)) {
+    const matchIndex = match.index ?? 0
+    const beforeDate = fragment.slice(start, matchIndex)
+    const connector = beforeDate.match(/(?:因为|所以|然后)?我?\s*$/)?.[0] ?? ''
+    const end = matchIndex - connector.length
+    const part = fragment.slice(start, end).trim()
+    if (part) parts.push(part)
+    start = matchIndex
+  }
+
+  const finalPart = fragment.slice(start).trim()
+  if (finalPart) parts.push(finalPart)
+  return parts
+}
+
 function getIndependentTodoRecords(text) {
-  if (!/(?:然后|并且|以及|接着|随后)/.test(text)) return []
+  if (!/(?:然后|并且|以及|接着|随后)/.test(text)) {
+    const dateSeparated = splitOnDateChanges(text)
+    if (dateSeparated.length < 2) return []
+  }
 
   const fragments = text
     .split(/(?:然后|并且|以及|接着|随后)/)
+    .flatMap(splitOnDateChanges)
     .map((fragment) => fragment.trim().replace(/^[，,。；;]+|[，,。；;]+$/g, ''))
     .filter(Boolean)
   if (fragments.length < 2) return []
