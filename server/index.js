@@ -567,6 +567,22 @@ async function runChatOperation(operation, task) {
   }
 }
 
+function getSafeAiFailureReason(error) {
+  if (error instanceof Error && error.name === 'AbortError') return 'timeout'
+  const status = error instanceof Error
+    ? Number(error.message.match(/DeepSeek request failed: (\d{3})/)?.[1])
+    : 0
+
+  if (status === 400 || status === 422) return 'invalid_request'
+  if (status === 401) return 'authentication'
+  if (status === 402) return 'balance'
+  if (status === 403) return 'authorization'
+  if (status === 404) return 'model_or_endpoint'
+  if (status === 429) return 'rate_limit'
+  if (status >= 500) return 'upstream'
+  return 'network_or_configuration'
+}
+
 function getSummarySystemPrompt(period) {
   const shared = [
     '你是 LifePilot，一个温和、克制、实用的 AI 个人生活管家。',
@@ -779,11 +795,12 @@ app.post('/api/chat', async (req, res) => {
       runChatOperation('extraction', () => extractRecords(requestPayload)),
     ])
     const chatSucceeded = chatResult.status === 'fulfilled'
-    const reply = chatSucceeded
+    const rawReply = chatSucceeded
       ? chatResult.value
       : typeof requestPayload.fallbackReply === 'string' && requestPayload.fallbackReply.trim()
         ? requestPayload.fallbackReply.trim()
         : '我在。先帮你把这句话接住，等会儿我们再慢慢整理。'
+    const reply = applyReplySafeguard(requestPayload, rawReply)
     const records = extractionResult.status === 'fulfilled' ? extractionResult.value : []
 
     if (process.env.NODE_ENV !== 'production') {
@@ -798,6 +815,7 @@ app.post('/api/chat', async (req, res) => {
       reply,
       records,
       source: chatSucceeded ? 'ai' : 'fallback',
+      ...(!chatSucceeded ? { fallbackReason: getSafeAiFailureReason(chatResult.reason) } : {}),
       ...(chatSucceeded ? { model: DEEPSEEK_MODEL } : {}),
     })
   } catch {
