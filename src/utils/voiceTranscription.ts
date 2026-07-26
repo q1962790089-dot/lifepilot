@@ -264,13 +264,21 @@ function getVoiceErrorMessage(error: string) {
 function getWechatStartRecordError(response: WechatSdkResponse) {
   const error = typeof response.errMsg === 'string' ? response.errMsg.trim().toLowerCase() : ''
   const isIosWechat = /iphone|ipad|ipod/i.test(navigator.userAgent)
+  const reason = error
+    .replace(/^startrecord:fail/i, '')
+    .replace(/^[\s,:;._-]+|[\s,:;._-]+$/g, '')
 
-  if (isIosWechat && (error === '' || error === 'startrecord:fail')) return null
-  if (/not support|unsupported/.test(error)) return '当前微信版本不支持网页录音，请升级微信后重试。'
-  if (/permission|authorize|authorise|access denied|forbidden|deny/.test(error)) {
+  if (isIosWechat && !reason) return null
+  if (/not support|unsupported|isn't supported|current webview/.test(reason)) {
+    return '当前微信打开方式不支持网页录音，请退出浮窗后从公众号消息中打开。'
+  }
+  if (/permission|authorize|authorise|access denied|forbidden|deny/.test(reason)) {
     return '微信麦克风权限未开启，请到 iPhone“设置 > 微信 > 麦克风”中打开。'
   }
-  return '微信录音启动失败，请重新打开页面后重试。'
+  const safeReason = reason.replace(/\p{Cc}/gu, '').slice(0, 60)
+  return safeReason
+    ? `微信录音启动失败（${safeReason}）`
+    : '微信录音启动失败，请稍后重试。'
 }
 
 async function createWechatVoiceSession(config: VoiceConfig, callbacks: VoiceCallbacks): Promise<VoiceSession> {
