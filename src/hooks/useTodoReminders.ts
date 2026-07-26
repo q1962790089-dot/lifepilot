@@ -12,6 +12,10 @@ function getDueReminders(now: number) {
     && record.reminderEnabled
     && typeof record.reminderAt === 'string'
     && !record.remindedAt
+    && (
+      Number.isNaN(Date.parse(record.createdAt))
+      || Date.parse(record.reminderAt) >= Date.parse(record.createdAt)
+    )
     && Date.parse(record.reminderAt) <= now
   ))
 }

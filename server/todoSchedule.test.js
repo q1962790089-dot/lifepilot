@@ -61,6 +61,8 @@ test('resolves relative dates from the sent message time across midnight', () =>
 })
 
 test('parses supported Chinese time expressions deterministically', () => {
+  assert.deepEqual(parseExplicitTime('晚上7:00'), { time: '19:00', sourceTimeText: '晚上7:00' })
+  assert.deepEqual(parseExplicitTime('早上9:00'), { time: '09:00', sourceTimeText: '早上9:00' })
   assert.deepEqual(parseExplicitTime('下午三点'), { time: '15:00', sourceTimeText: '下午三点' })
   assert.deepEqual(parseExplicitTime('晚上八点'), { time: '20:00', sourceTimeText: '晚上八点' })
   assert.deepEqual(parseExplicitTime('凌晨一点'), { time: '01:00', sourceTimeText: '凌晨一点' })

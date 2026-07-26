@@ -11,19 +11,33 @@ export function isIncompleteRecordText(text) {
 
 export function getFlightItineraryDetails(text) {
   if (typeof text !== 'string') return undefined
-  const flight = text.match(/(\d{1,2}\s*[:：]\s*\d{2})\s*(多)?(?:的)?(?:飞机|航班).*?到([\u4e00-\u9fff]{2,8}?)(?:是|大约|约)?\s*(\d{1,2}\s*[:：]\s*\d{2})/)
-  const classPlan = text.match(/(?:明天早上|明早|明天)\s*(\d{1,2}\s*[:：]\s*\d{2}).*?(?:上课|有课)/)
-  if (!flight || !classPlan) return undefined
+  const flight = text.match(/(凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2}\s*[:：]\s*\d{2})\s*(多)?(?:的)?(?:飞机|航班).*?到([\u4e00-\u9fff]{2,8}?)(?:是|大约|约)?\s*(凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2}\s*[:：]\s*\d{2})/)
+  const classPlan = text.match(/(?:明天早上|明早|明天)\s*(\d{1,2}\s*[:：]\s*\d{2}).*?(?:上课|有课|的课)/)
+  const arrivalDeadline = text.match(/((?:明天早上|明早|明天)\s*(\d{1,2}\s*[:：]\s*\d{2})(?:(?!(?:明天|明早)).)*?(?:一定要|必须|得)\s*(?:到|赶到)([\u4e00-\u9fff]{2,8}?)(?=上课|[，。！？,.!?]|$))/)
+  if (!flight || (!classPlan && !arrivalDeadline)) return undefined
 
-  const uncertainDestination = text.match(/不确定.*?去([\u4e00-\u9fff]{2,8}?)(?=到?明天|因为|$)/)?.[1]
+  const uncertainTransport = /不确定.*?(?:大巴|公交|巴士)/.test(text)
+  const uncertainDestination = uncertainTransport
+    ? undefined
+    : text.match(/不确定.*?去([\u4e00-\u9fff]{2,8}?)(?=但是|不过|但|到?明天|因为|$)/)?.[1]
   return {
-    departureTime: flight[1].replace(/\s+/g, '').replace('：', ':'),
-    approximateDeparture: Boolean(flight[2]),
-    arrivalDestination: flight[3],
-    arrivalTime: flight[4].replace(/\s+/g, '').replace('：', ':'),
-    classTime: classPlan[1].replace(/\s+/g, '').replace('：', ':'),
-    classSourceText: classPlan[0],
-    uncertainDestination,
+    departureTime: flight[2].replace(/\s+/g, '').replace('：', ':'),
+    approximateDeparture: Boolean(flight[3]),
+    arrivalDestination: flight[4],
+    arrivalTime: flight[6].replace(/\s+/g, '').replace('：', ':'),
+    ...(flight[1] ? { departurePeriod: flight[1] } : {}),
+    ...(flight[5] ? { arrivalPeriod: flight[5] } : {}),
+    ...(classPlan ? {
+      classTime: classPlan[1].replace(/\s+/g, '').replace('：', ':'),
+      classSourceText: classPlan[0],
+    } : {}),
+    ...(arrivalDeadline ? {
+      deadlineTime: arrivalDeadline[2].replace(/\s+/g, '').replace('：', ':'),
+      deadlineDestination: arrivalDeadline[3],
+      deadlineSourceText: arrivalDeadline[1],
+    } : {}),
+    ...(uncertainDestination ? { uncertainDestination } : {}),
+    ...(uncertainTransport ? { uncertainTransport: true } : {}),
   }
 }
 
@@ -158,19 +172,29 @@ export function getDeterministicExtraction(text, suggestedCategory) {
   }
   const flightItinerary = getFlightItineraryDetails(normalized)
   if (flightItinerary) {
-    const departureLabel = `${flightItinerary.departureTime}${flightItinerary.approximateDeparture ? '多' : ''}`
+    const departureLabel = `${flightItinerary.departurePeriod ?? ''}${flightItinerary.departureTime}${flightItinerary.approximateDeparture ? '多' : ''}`
+    const arrivalLabel = `${flightItinerary.arrivalPeriod ?? ''}${flightItinerary.arrivalTime}`
+    const finalPlan = flightItinerary.deadlineDestination
+      ? {
+          category: 'todo',
+          text: `到${flightItinerary.deadlineDestination}${flightItinerary.classTime ? '上课' : ''}`,
+          sourceText: flightItinerary.deadlineSourceText,
+        }
+      : {
+          category: 'todo',
+          text: '上课',
+          sourceText: flightItinerary.classSourceText,
+        }
     return {
       records: [
         {
           category: 'todo',
-          text: `乘${departureLabel}的航班到${flightItinerary.arrivalDestination}（${flightItinerary.arrivalTime}到）`,
-          sourceText: `晚点${flightItinerary.departureTime}乘航班到${flightItinerary.arrivalDestination}`,
+          text: `乘${departureLabel}的航班到${flightItinerary.arrivalDestination}（${arrivalLabel}到）`,
+          sourceText: flightItinerary.departurePeriod
+            ? `${flightItinerary.departurePeriod}${flightItinerary.departureTime}乘航班到${flightItinerary.arrivalDestination}`
+            : `晚点${flightItinerary.departureTime}乘航班到${flightItinerary.arrivalDestination}`,
         },
-        {
-          category: 'todo',
-          text: '上课',
-          sourceText: flightItinerary.classSourceText,
-        },
+        finalPlan,
       ],
     }
   }

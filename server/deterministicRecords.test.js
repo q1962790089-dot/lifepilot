@@ -137,3 +137,34 @@ test('separates a flight itinerary from a later fixed class and ignores an uncer
     ],
   })
 })
+
+test('combines a fixed arrival deadline with class and ignores uncertain transport', () => {
+  const text = '我晚上7:00的飞机到广州是9:00我不确定我会不会再坐大巴我也不知道有没有大巴然后去东莞但是我明天早上9:00的课所以我明天9:00一定要到东莞'
+  assert.deepEqual(getFlightItineraryDetails(text), {
+    departureTime: '7:00',
+    approximateDeparture: false,
+    arrivalDestination: '广州',
+    arrivalTime: '9:00',
+    departurePeriod: '晚上',
+    classTime: '9:00',
+    classSourceText: '明天早上9:00的课',
+    deadlineTime: '9:00',
+    deadlineDestination: '东莞',
+    deadlineSourceText: '明天9:00一定要到东莞',
+    uncertainTransport: true,
+  })
+  assert.deepEqual(getDeterministicExtraction(text, 'todo'), {
+    records: [
+      {
+        category: 'todo',
+        text: '乘晚上7:00的航班到广州（9:00到）',
+        sourceText: '晚上7:00乘航班到广州',
+      },
+      {
+        category: 'todo',
+        text: '到东莞上课',
+        sourceText: '明天9:00一定要到东莞',
+      },
+    ],
+  })
+})

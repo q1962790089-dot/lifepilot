@@ -129,10 +129,14 @@ function parseHour(value) {
 
 export function parseExplicitTime(text) {
   if (typeof text !== 'string') return undefined
-  const clockMatch = text.match(/(\d{1,2})\s*[:：]\s*(\d{2})/)
+  const clockMatch = text.match(/(凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2})\s*[:：]\s*(\d{2})/)
   if (clockMatch) {
-    const time = `${clockMatch[1].padStart(2, '0')}:${clockMatch[2]}`
-    if (isTimeValue(time)) return { time, sourceTimeText: clockMatch[0] }
+    const period = clockMatch[1] ?? ''
+    let hour = Number(clockMatch[2])
+    if ((period === '下午' || period === '晚上' || period === '傍晚') && hour < 12) hour += 12
+    if (period === '凌晨' && hour === 12) hour = 0
+    const time = `${String(hour).padStart(2, '0')}:${clockMatch[3]}`
+    if (isTimeValue(time)) return { time, sourceTimeText: clockMatch[0].trim() }
   }
 
   const match = text.match(/(凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(半)?/)

@@ -372,6 +372,10 @@ function normalizeExtractedRecords(payload, extraction) {
     const scheduledAt = dueDate && time
       ? buildScheduledAt(dueDate, time, messageTimeContext.timeZone)
       : undefined
+    const reminderEnabled = Boolean(
+      scheduledAt
+      && Date.parse(scheduledAt) >= Date.parse(createdAt),
+    )
     const extracted = buildExtractedData(text, category)
 
     records.push({
@@ -381,8 +385,8 @@ function normalizeExtractedRecords(payload, extraction) {
         scheduledAt,
         timePrecision: 'datetime',
         hasExplicitTime: true,
-        reminderEnabled: true,
-        reminderAt: scheduledAt,
+        reminderEnabled,
+        ...(reminderEnabled ? { reminderAt: scheduledAt } : {}),
         timeZone: messageTimeContext.timeZone,
         ...(sourceTimeText ? { sourceTimeText } : {}),
       } : category === 'todo' ? { timePrecision: 'date', hasExplicitTime: false } : {}),
@@ -405,11 +409,16 @@ function createNaturalRecordReply(text, inferredCategory, isRecordingFollowUp = 
   if (flightItinerary) {
     const departure = formatSpokenClock(flightItinerary.departureTime)
     const arrival = formatSpokenClock(flightItinerary.arrivalTime)
-    const classTime = formatSpokenClock(flightItinerary.classTime)
+    const classTime = flightItinerary.classTime ? formatSpokenClock(flightItinerary.classTime) : ''
     const uncertainStop = flightItinerary.uncertainDestination
       ? `；之后去不去${flightItinerary.uncertainDestination}先不定`
+      : flightItinerary.uncertainTransport
+        ? '；大巴是否有车先不确定'
       : ''
-    return `好，${departure}${flightItinerary.approximateDeparture ? '多' : ''}的航班，${arrival}到${flightItinerary.arrivalDestination}${uncertainStop}，明早${classTime}还有课。`
+    const finalPlan = flightItinerary.deadlineDestination
+      ? `明早${formatSpokenClock(flightItinerary.deadlineTime)}前要到${flightItinerary.deadlineDestination}${flightItinerary.classTime ? '上课' : ''}`
+      : `明早${classTime}还有课`
+    return `好，${flightItinerary.departurePeriod ?? ''}${departure}${flightItinerary.approximateDeparture ? '多' : ''}的航班，${flightItinerary.arrivalPeriod ?? ''}${arrival}到${flightItinerary.arrivalDestination}${uncertainStop}；${finalPlan}。`
   }
   if (inferredCategory === 'todo' && /(飞机|航班)/.test(text)) {
     const times = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})/g)
@@ -441,7 +450,7 @@ function applyReplySafeguard(payload, reply) {
   if (isIncompleteRecordText(text)) {
     return '这句还没说完，你接着说就好。'
   }
-  if (payload.intent === 'record' && getFlightItineraryDetails(text)) {
+  if (getFlightItineraryDetails(text)) {
     return createNaturalRecordReply(text, 'todo')
   }
   const inferredCategory = getDeterministicExtraction(text, payload.category).records[0]?.category ?? payload.category

@@ -215,6 +215,32 @@ function createHumanFallbackReply(text: string, intent: Intent, preferences: Lif
   return null
 }
 
+function createFlightItineraryFallback(text: string) {
+  const itinerary = text.match(/(凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2}\s*[:：]\s*\d{2})\s*(多)?(?:的)?(?:飞机|航班).*?到([\u4e00-\u9fff]{2,8}?)(?:是|大约|约)?\s*(凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2}\s*[:：]\s*\d{2})/)
+  const classPlan = text.match(/(?:明天早上|明早|明天)\s*(\d{1,2}\s*[:：]\s*\d{2}).*?(?:上课|有课|的课)/)
+  const arrivalDeadline = text.match(/(?:明天早上|明早|明天)\s*(\d{1,2}\s*[:：]\s*\d{2})(?:(?!(?:明天|明早)).)*?(?:一定要|必须|得)\s*(?:到|赶到)([\u4e00-\u9fff]{2,8}?)(?=上课|[，。！？,.!?]|$)/)
+  if (!itinerary || (!classPlan && !arrivalDeadline)) return null
+
+  const formatClock = (value: string) => value
+    .replace(/\s+/g, '')
+    .replace('：', ':')
+    .replace(/:00$/, '点')
+  const uncertainTransport = /不确定.*?(?:大巴|公交|巴士)/.test(text)
+  const uncertainDestination = uncertainTransport
+    ? undefined
+    : text.match(/不确定.*?去([\u4e00-\u9fff]{2,8}?)(?=但是|不过|但|到?明天|因为|$)/)?.[1]
+  const uncertainText = uncertainDestination
+    ? `；之后去不去${uncertainDestination}先不定`
+    : uncertainTransport
+      ? '；大巴是否有车先不确定'
+      : ''
+  const finalPlan = arrivalDeadline
+    ? `明早${formatClock(arrivalDeadline[1])}前要到${arrivalDeadline[2]}${classPlan ? '上课' : ''}`
+    : `明早${formatClock(classPlan![1])}还有课`
+
+  return `好，${itinerary[1] ?? ''}${formatClock(itinerary[2])}${itinerary[3] ? '多' : ''}的航班，${itinerary[5] ?? ''}${formatClock(itinerary[6])}到${itinerary[4]}${uncertainText}；${finalPlan}。`
+}
+
 function createFallbackReply(
   text: string,
   intent: Intent,
@@ -222,6 +248,9 @@ function createFallbackReply(
   seed: number,
   preferences: LifePilotPreferences,
 ) {
+  const flightItineraryReply = createFlightItineraryFallback(text)
+  if (flightItineraryReply) return flightItineraryReply
+
   const humanReply = createHumanFallbackReply(text, intent, preferences)
   if (humanReply) return humanReply
 
@@ -232,16 +261,6 @@ function createFallbackReply(
 
   if (intent === 'record' && categories.length === 1) {
     if (firstCategory === 'todo' && /(飞机|航班)/.test(text)) {
-      const itinerary = text.match(/(\d{1,2}\s*[:：]\s*\d{2})\s*(多)?(?:的)?(?:飞机|航班).*?到([\u4e00-\u9fff]{2,8}?)(?:是|大约|约)?\s*(\d{1,2}\s*[:：]\s*\d{2})/)
-      const classPlan = text.match(/(?:明天早上|明早|明天)\s*(\d{1,2}\s*[:：]\s*\d{2}).*?(?:上课|有课)/)
-      if (itinerary && classPlan) {
-        const formatClock = (value: string) => value
-          .replace(/\s+/g, '')
-          .replace('：', ':')
-          .replace(/:00$/, '点')
-        const uncertainDestination = text.match(/不确定.*?去([\u4e00-\u9fff]{2,8}?)(?=到?明天|因为|$)/)?.[1]
-        return `好，${formatClock(itinerary[1])}${itinerary[2] ? '多' : ''}的航班，${formatClock(itinerary[4])}到${itinerary[3]}${uncertainDestination ? `；之后去不去${uncertainDestination}先不定` : ''}，明早${formatClock(classPlan[1])}还有课。`
-      }
       const times = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})/g)
         ?.map((value) => value
           .replace(/\s+/g, '')
