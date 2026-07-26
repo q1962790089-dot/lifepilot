@@ -24,11 +24,14 @@ import {
   isWechatBrowser,
 } from './wechatJssdk.js'
 import {
+  getCurrentExerciseStatusJournalText,
   getDeterministicExtraction,
   getFlightItineraryDetails,
   getReferencedRecordText,
   getSustainedLifeStateJournalText,
+  hasIndependentRecordConnector,
   isIncompleteRecordText,
+  isNegatedOrCancelledRecordText,
 } from './deterministicRecords.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
@@ -255,6 +258,7 @@ function getExtractionSystemPrompt() {
     'todo 的 text 必须是用户一眼能理解的完整动作，例如“去医院做雾化”“送狗去宠物店洗澡”“去超市买桃子”；不要直接使用整句，不要过度压缩。若 dueDate 已保存日期，text 不要重复今天/明天。',
     '使用输入 messageTimeContext 的 localDate 解析相对日期：今天/今晚为当天，明天/明早为 +1 天，后天为 +2 天。共同日期和明确时间要继承到每一条拆分后的 todo；不同时间或日期的动作分别输出，并分别填各自 dueDate 和 time。支持三点、3点、三点半、3:30、上午十点、中午十二点、下午三点、晚上八点、凌晨一点。没有明确日期时省略 dueDate；没有明确钟点时绝不填写 time。',
     '已完成的过去事件不能变成未完成 todo；如需记录，只输出一条保留完整事件的 journal，不能按动作拆成多条 journal。否定、取消或“不用买了”的内容不能生成 todo。条件性或可选任务（如“有时间的话再去洗车”）默认不提取。',
+    '“今天没跑步”“今天不去健身了”这类清楚的当日状态只能保存为 journal，不能保存为 exercise；未来被取消的动作不能新建记录。',
     '只使用用户明确说出的事实。不得猜测金额、日期、原因、人物、情绪、动机或医疗信息。不得把抱怨自动变成 Todo。',
     '默认只处理当前用户消息；不要引用聊天历史、长期记忆、人格设置或回复风格。',
   ].join('\n')
@@ -455,6 +459,12 @@ function applyReplySafeguard(payload, reply) {
   if (getSustainedLifeStateJournalText(text)) {
     return '这两个月健身节奏可能要断一下了。先别勉强，等条件允许再慢慢接回来。'
   }
+  if (getCurrentExerciseStatusJournalText(text)) {
+    return '好，今天就不安排健身了。先休息，之后再按自己的节奏接回来。'
+  }
+  if (isNegatedOrCancelledRecordText(text)) {
+    return '好，这项先不安排。'
+  }
   if (getFlightItineraryDetails(text)) {
     return createNaturalRecordReply(text, 'todo')
   }
@@ -599,7 +609,7 @@ async function extractRecords(payload) {
     && /(?:飞机|航班|机场)/.test(payload.text)
     && /出发/.test(payload.text)
   const isSingleClearRecord = deterministicRecords.length === 1
-    && !/[、，,；;]|\b(?:and|then)\b|并且|然后|以及/.test(payload.text)
+    && !hasIndependentRecordConnector(payload.text)
 
   if (deterministicRecords.length > 1 || isSingleClearRecord || isSingleFlightPlan) return deterministicRecords
 

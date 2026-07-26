@@ -9,6 +9,38 @@ export function isIncompleteRecordText(text) {
     && /(?:然后|但是|不过|因为|所以|如果|要是)\s*$/.test(text.trim())
 }
 
+export function isNegatedOrCancelledRecordText(text) {
+  if (typeof text !== 'string') return false
+
+  const normalized = text.trim()
+  const withoutConditionals = normalized.replace(/(?:如果|要是).{0,40}?(?:就|则)/g, '')
+  return /(?:不去|不做|不买|不取|不拿|不送|不订|不定|不开会|不上课|不运动|不跑步|不健身|没去|没有去|没跑步|没有跑步|没健身|没有健身)/.test(withoutConditionals)
+    || /(?:不用|不需要|不要|不再|取消|作废|算了).{0,12}(?:去|做|买|取|拿|送|订|定|上课|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/.test(withoutConditionals)
+    || /(?:去|做|买|取|拿|送|订|定|上课|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理).{0,8}(?:取消了|不做了|不用了|算了)/.test(withoutConditionals)
+}
+
+export function getCurrentExerciseStatusJournalText(text) {
+  if (typeof text !== 'string') return undefined
+
+  const normalized = text.trim().replace(/见不了身/g, '健不了身')
+  const isCurrentStatus = /(?:今天|今日|今晚)/.test(normalized)
+  const isNegativeExerciseStatus = /(?:不去健身|不健身|不运动|不跑步|不能健身|没法健身|无法健身|没跑步|没有跑步|没健身|没有健身)/.test(normalized)
+  if (!isCurrentStatus || !isNegativeExerciseStatus) return undefined
+
+  return normalized
+    .replace(/[。！？!?]+$/g, '')
+    .replace(/^(?:然后|接着|随后)\s*/, '')
+    .replace(/^我\s*/, '')
+    .trim() || undefined
+}
+
+export function hasIndependentRecordConnector(text) {
+  if (typeof text !== 'string') return false
+
+  const withoutLeadingConnector = text.trim().replace(/^(?:然后|接着|随后|并且|以及)\s*/, '')
+  return /[、，,；;]|\b(?:and|then)\b|并且|然后|以及|接着|随后/i.test(withoutLeadingConnector)
+}
+
 export function getFlightItineraryDetails(text) {
   if (typeof text !== 'string') return undefined
   const flight = text.match(/(凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2}\s*[:：]\s*\d{2})\s*(多)?(?:的)?(?:飞机|航班).*?到([\u4e00-\u9fff]{2,8}?)(?:是|大约|约)?\s*(凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2}\s*[:：]\s*\d{2})/)
@@ -44,6 +76,7 @@ export function getFlightItineraryDetails(text) {
 export function isClearTodoText(text) {
   if (typeof text !== 'string') return false
   const normalized = text.trim()
+  if (isNegatedOrCancelledRecordText(normalized)) return false
   const hasAction = ACTION_PATTERN.test(normalized)
   const hasExplicitPlan = /(?:记得|提醒我|待办|计划|要做|需要去|得去|准备去|打算去|我要去|我得|我需要|可能要|还要)/.test(normalized)
   const hasLaterPlan = /(?:晚点|待会儿?|一会儿?|等下)/.test(normalized) && hasAction
@@ -220,6 +253,21 @@ export function getDeterministicExtraction(text, suggestedCategory) {
       ],
     }
   }
+
+  const sustainedLifeState = getSustainedLifeStateJournalText(normalized)
+  if (sustainedLifeState) {
+    return { records: [{ category: 'journal', text: sustainedLifeState }] }
+  }
+
+  const currentExerciseStatus = getCurrentExerciseStatusJournalText(normalized)
+  if (currentExerciseStatus) {
+    return { records: [{ category: 'journal', text: currentExerciseStatus }] }
+  }
+
+  if (isNegatedOrCancelledRecordText(normalized)) {
+    return { records: [] }
+  }
+
   const independentTodos = getIndependentTodoRecords(normalized)
 
   if (independentTodos.length > 1) {
@@ -228,11 +276,6 @@ export function getDeterministicExtraction(text, suggestedCategory) {
 
   if (isClearTodoText(normalized)) {
     return { records: [{ category: 'todo', text: cleanTodoText(normalized) }] }
-  }
-
-  const sustainedLifeState = getSustainedLifeStateJournalText(normalized)
-  if (sustainedLifeState) {
-    return { records: [{ category: 'journal', text: sustainedLifeState }] }
   }
 
   if (/(?:体重|kg|公斤|斤)/i.test(lower) && /\d/.test(lower)) {

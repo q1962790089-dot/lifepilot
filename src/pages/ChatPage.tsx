@@ -196,6 +196,18 @@ function createHumanFallbackReply(text: string, intent: Intent, preferences: Lif
   ) {
     return '这两个月健身节奏可能要断一下了。先别勉强，等条件允许再慢慢接回来。'
   }
+  if (
+    /(?:今天|今日|今晚)/.test(normalized)
+    && /(?:不去健身|不健身|不运动|不跑步|不能健身|没法健身|无法健身|没跑步|没有跑步|没健身|没有健身)/.test(normalized)
+  ) {
+    return '好，今天就不安排健身了。先休息，之后再按自己的节奏接回来。'
+  }
+  if (
+    /(?:不去|不做|不买|不取|不拿|不送|不订|不定|不开会|不上课|不运动|不跑步|不健身)/.test(normalized)
+    || /(?:不用|不需要|不要|不再|取消|作废|算了).{0,12}(?:去|做|买|取|拿|送|订|定|上课|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/.test(normalized)
+  ) {
+    return '好，这项先不安排。'
+  }
   if (/(怎么(办|回复|说|选)|是不是我的错|谁的错|合不合理)/.test(normalized) || intent === 'question') {
     return direct
       ? '先别急着解释。把对方要你改的点、标准和时间确认清楚，最后把结论留成文字。'

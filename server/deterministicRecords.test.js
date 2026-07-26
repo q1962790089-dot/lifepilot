@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  getCurrentExerciseStatusJournalText,
   getDeterministicExtraction,
   getFlightItineraryDetails,
   getReferencedRecordText,
   getSustainedLifeStateJournalText,
+  hasIndependentRecordConnector,
   isClearTodoText,
   isIncompleteRecordText,
+  isNegatedOrCancelledRecordText,
 } from './deterministicRecords.js'
 
 test('recognizes a spoken future plan as a todo without AI', () => {
@@ -54,6 +57,28 @@ test('stores a sustained exercise limitation as one journal record', () => {
       ],
     },
   )
+})
+
+test('keeps a clear current non-exercise status as journal instead of exercise', () => {
+  assert.equal(getCurrentExerciseStatusJournalText('今天不去健身了'), '今天不去健身了')
+  assert.deepEqual(getDeterministicExtraction('今天不去健身了', 'exercise'), {
+    records: [{ category: 'journal', text: '今天不去健身了' }],
+  })
+  assert.deepEqual(getDeterministicExtraction('我今天没跑步', 'exercise'), {
+    records: [{ category: 'journal', text: '今天没跑步' }],
+  })
+})
+
+test('does not create new records from cancelled or negated future actions', () => {
+  assert.equal(isNegatedOrCancelledRecordText('明天不用买牛奶了'), true)
+  assert.equal(isClearTodoText('明天不去健身了'), false)
+  assert.deepEqual(getDeterministicExtraction('明天不去健身了', 'todo'), { records: [] })
+  assert.deepEqual(getDeterministicExtraction('明天不用买牛奶了', 'todo'), { records: [] })
+})
+
+test('ignores a leading speech connector when deciding whether one record needs AI splitting', () => {
+  assert.equal(hasIndependentRecordConnector('然后我接下来两个月可能无法健身'), false)
+  assert.equal(hasIndependentRecordConnector('我先订酒店，然后明天去上课'), true)
 })
 
 test('resolves a record-follow-up to the previous user message', () => {
