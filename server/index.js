@@ -188,7 +188,7 @@ function getChatSystemPrompt(rawPreferences, currentText, category, intent, mess
     '不要公开解释对话策略，例如“现在先不分析”“等你气消再判断”“我正在认真倾听”。直接用自然的回应表现出来。',
     '普通回复保持短：record_only 1-2 句，casual/venting/comfort 通常 1-3 句；只有 solution 或 serious 按实际需要稍长。每次最多一个有意义的问题，也可以完全不问。',
     '历史上下文最多自然引用一条真正相关的细节；不要重复最近几轮已经提过的信息，不要用数据报告语气证明你记得。',
-    '记录由应用在对话外处理。你只负责自然回复，不要把“已记录”写成机械系统提示，也不得用“记上了”“收到”“好的”单独敷衍。',
+    '记录由应用在对话外处理。你只负责自然回复，不要把“已记录”写成机械系统提示，也不得用“记上了”“收到”“好的”“知道了”“明白了”单独敷衍。',
     '对于明确计划，简短复述关键安排并补一句克制、实际的关心；例如赶飞机可以提醒路上留出余量。不要声称保存成功，也不要连续使用同一句模板。',
     `当前消息的不可变时间基准：用户本地日期 ${messageTimeContext.localDate}，本地时间 ${messageTimeContext.localTime}，时区 ${messageTimeContext.timeZone}，UTC 偏移 ${formatUtcOffset(messageTimeContext.utcOffsetMinutes)}。今天指 ${messageTimeContext.localDate}，明天指 ${addDaysToDateKey(messageTimeContext.localDate, 1)}，后天指 ${addDaysToDateKey(messageTimeContext.localDate, 2)}。涉及当前时间或相对日期时必须以此为准，不得猜测服务器时间或训练数据时间。`,
     '若用户在询问某个时间是否已过、是否迟到或距离现在多久，先用上述本地时间直接判断并说明结论；不要回避问题或把它改写成泛泛的情绪回应。',
@@ -394,7 +394,7 @@ function applyReplySafeguard(payload, reply) {
   const isVenting = /(别分析|只想骂|就是想骂|领导|老板).*(骂|说|批评)?|被.*(骂|说|批评)/.test(text)
   const startsByAskingForContext = /^(先确认|先说说|把.+发给我|没头没尾|你先把|需要先了解)/.test(reply)
   const endsWithQuestion = /[？?]\s*$/.test(reply)
-  const isMechanicalRecordReply = /^(?:记上了|记下了|已记录|记录好了|收到|好的|好)[。！!]?$/.test(reply.trim())
+  const isMechanicalRecordReply = /^(?:记上了|记下了|记好了|已记录|记录好了|收到|好的|好|知道了|知道啦|明白了|行)[。！!]?$/.test(reply.trim())
 
   if (payload.intent === 'record' && isMechanicalRecordReply) {
     if (inferredCategory === 'todo' && /(飞机|航班)/.test(text)) {
