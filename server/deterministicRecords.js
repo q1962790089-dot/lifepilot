@@ -1,4 +1,5 @@
-const ACTION_PATTERN = /(?:去|做|买|取|拿|送|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/
+const ACTION_PATTERN = /(?:去|出发|做|买|取|拿|送|开会|赶|交|办|联系|预约|复习|学习|运动|跑步|健身|检查|处理|整理)/
+const CLOCK_PATTERN = /(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})(?:点(?:钟|半)?|[:：]\d{2})/g
 
 export function isClearTodoText(text) {
   if (typeof text !== 'string') return false
@@ -8,18 +9,43 @@ export function isClearTodoText(text) {
   const hasLaterPlan = /(?:晚点|待会儿?|一会儿?|等下)/.test(normalized) && hasAction
   const hasFutureDay = /(?:今晚|明天|明早|后天)/.test(normalized) && hasAction
   const hasTodayPlan = /今天.*(?:要|需要|得|准备|打算|计划)/.test(normalized) && hasAction
+  const hasTimedDeparture = /(?:\d{1,2}\s*[:：]\s*\d{2}|(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点).{0,10}出发/.test(normalized)
+    && /(?:飞机|航班|机场)/.test(normalized)
 
-  return hasExplicitPlan || hasLaterPlan || hasFutureDay || hasTodayPlan
+  return hasExplicitPlan || hasLaterPlan || hasFutureDay || hasTodayPlan || hasTimedDeparture
 }
 
 function cleanTodoText(text) {
   let result = text.trim().replace(/[。！？!?]+$/g, '')
+  const flightTimes = result.match(CLOCK_PATTERN) ?? []
+  if (/(?:飞机|航班|机场)/.test(result) && /出发/.test(result)) {
+    const flightTime = flightTimes.length > 1 ? flightTimes[flightTimes.length - 1].trim() : ''
+    return flightTime ? `出发赶${flightTime}的飞机` : '出发去机场'
+  }
+
   result = result.replace(/^(?:请)?(?:帮我)?(?:记得|提醒我|记一下|加个待办)\s*/, '')
   result = result.replace(/^我\s*/, '')
   result = result.replace(/^(?:今天|今晚|明天|明早|后天|晚点|待会儿?|一会儿?|等下)\s*/, '')
   result = result.replace(/^(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?\s*/, '')
   result = result.replace(/^(?:要|需要|得|准备|打算|计划)\s*/, '')
   return result || text.trim()
+}
+
+export function getReferencedRecordText(text, messages) {
+  if (typeof text !== 'string') return undefined
+  const normalized = text.trim().replace(/[。！？!?]+$/g, '')
+  const isReference = /^(?:你)?(?:帮我|给我)?(?:记录|记下|记一下|存一下|保存)(?:吧|一下|下来|刚才那条|刚才说的)?$/.test(normalized)
+    || /^(?:把)?刚才(?:那条|说的)?(?:帮我)?(?:记录|记下|保存)(?:吧|下来)?$/.test(normalized)
+  if (!isReference || !Array.isArray(messages)) return undefined
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.sender === 'user' && typeof message.text === 'string' && message.text.trim()) {
+      return message.text.trim()
+    }
+  }
+
+  return undefined
 }
 
 export function getDeterministicExtraction(text, suggestedCategory) {

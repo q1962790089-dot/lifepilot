@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   getDeterministicExtraction,
+  getReferencedRecordText,
   isClearTodoText,
 } from './deterministicRecords.js'
 
@@ -21,4 +22,15 @@ test('keeps clear health, expense, and exercise facts available when AI fails', 
 test('does not turn ordinary emotion or casual chat into a record', () => {
   assert.deepEqual(getDeterministicExtraction('今天好累。', 'journal'), { records: [] })
   assert.deepEqual(getDeterministicExtraction('为什么总是这样？', 'journal'), { records: [] })
+})
+
+test('resolves a record-follow-up to the previous user message', () => {
+  const previousText = '我的飞机晚点了，然后4:00出发，因为是7:00的飞机'
+  assert.equal(getReferencedRecordText('你帮我记录吧', [
+    { sender: 'user', text: previousText },
+    { sender: 'ai', text: '我在听。' },
+  ]), previousText)
+  assert.deepEqual(getDeterministicExtraction(previousText, 'journal'), {
+    records: [{ category: 'todo', text: '出发赶7:00的飞机' }],
+  })
 })

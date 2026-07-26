@@ -23,7 +23,10 @@ import {
   getWechatRuntimeConfig,
   isWechatBrowser,
 } from './wechatJssdk.js'
-import { getDeterministicExtraction } from './deterministicRecords.js'
+import {
+  getDeterministicExtraction,
+  getReferencedRecordText,
+} from './deterministicRecords.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions'
@@ -385,6 +388,35 @@ function normalizeExtractedRecords(payload, extraction) {
   return records
 }
 
+function formatSpokenClock(value) {
+  return value
+    .replace(/\s+/g, '')
+    .replace(/[：:](?:00)?$/, '点')
+    .replace('点钟', '点')
+}
+
+function createNaturalRecordReply(text, inferredCategory, isRecordingFollowUp = false) {
+  if (inferredCategory === 'todo' && /(飞机|航班)/.test(text)) {
+    const times = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})/g)
+      ?.map(formatSpokenClock) ?? []
+    if (/出发/.test(text) && times.length > 1) {
+      if (isRecordingFollowUp) {
+        return `好，上一句按待办处理：${times[0]}出发赶${times[times.length - 1]}的飞机。路上多留点余量。`
+      }
+      return `好，${times[0]}出发赶${times[times.length - 1]}的飞机。路上多留点余量，别把自己卡得太紧。`
+    }
+    if (isRecordingFollowUp) {
+      return `好，上一句按待办处理：${times[0] ? `${times[0]}赶` : '赶'}飞机。路上多留点余量。`
+    }
+    return `好，${times[0] ? `${times[0]}要` : ''}赶飞机。路上多留点余量，别把自己卡得太紧。`
+  }
+  if (inferredCategory === 'todo') return '好，按这个安排来。到点前给自己留一点余量。'
+  if (inferredCategory === 'expense') return '这笔我看到了，之后回看账目时会更清楚。'
+  if (inferredCategory === 'weight') return '好，先看后面的连续趋势，不急着评价这一次。'
+  if (inferredCategory === 'exercise') return '今天这段运动算数，按自己的节奏来。'
+  return '嗯，我在听。你可以继续说，不用一次讲完整。'
+}
+
 function applyReplySafeguard(payload, reply) {
   const text = typeof payload.text === 'string' ? payload.text : ''
   const inferredCategory = getDeterministicExtraction(text, payload.category).records[0]?.category ?? payload.category
@@ -395,19 +427,24 @@ function applyReplySafeguard(payload, reply) {
   const startsByAskingForContext = /^(先确认|先说说|把.+发给我|没头没尾|你先把|需要先了解)/.test(reply)
   const endsWithQuestion = /[？?]\s*$/.test(reply)
   const isMechanicalRecordReply = /^(?:记上了|记下了|记好了|已记录|记录好了|收到|好的|好|知道了|知道啦|明白了|行)[。！!]?$/.test(reply.trim())
+  const isGenericListeningReply = /(我在听|继续说|不用一次讲完整|慢慢说)/.test(reply)
+  const repeatsRecentAiReply = Array.isArray(payload.messages)
+    && payload.messages.some((message) => (
+      message?.sender === 'ai'
+      && typeof message.text === 'string'
+      && message.text.trim() === reply.trim()
+    ))
 
-  if (payload.intent === 'record' && isMechanicalRecordReply) {
-    if (inferredCategory === 'todo' && /(飞机|航班)/.test(text)) {
-      const spokenTime = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?/)?.[0]
-        ?.replace('点钟', '点')
-        .trim()
-      return `好，${spokenTime ? `${spokenTime}要` : ''}赶飞机。路上多留点余量，别把自己卡得太紧。`
-    }
-    if (inferredCategory === 'todo') return '好，按这个安排来。到点前给自己留一点余量。'
-    if (inferredCategory === 'expense') return '这笔我看到了，之后回看账目时会更清楚。'
-    if (inferredCategory === 'weight') return '好，先看后面的连续趋势，不急着评价这一次。'
-    if (inferredCategory === 'exercise') return '今天这段运动算数，按自己的节奏来。'
-    return '嗯，我在听。你可以继续说，不用一次讲完整。'
+  if (
+    payload.intent === 'record'
+    && (
+      isMechanicalRecordReply
+      || repeatsRecentAiReply
+      || (inferredCategory === 'todo' && isGenericListeningReply)
+      || (payload.recordingFollowUp && isGenericListeningReply)
+    )
+  ) {
+    return createNaturalRecordReply(text, inferredCategory, payload.recordingFollowUp)
   }
 
   if (isSolution && startsByAskingForContext) {
@@ -511,10 +548,14 @@ async function generateChatReply(payload) {
 async function extractRecords(payload) {
   const deterministicExtraction = getDeterministicExtraction(payload.text, payload.category)
   const deterministicRecords = normalizeExtractedRecords(payload, deterministicExtraction)
+  const isSingleFlightPlan = deterministicRecords.length === 1
+    && deterministicRecords[0].category === 'todo'
+    && /(?:飞机|航班|机场)/.test(payload.text)
+    && /出发/.test(payload.text)
   const isSingleClearRecord = deterministicRecords.length === 1
     && !/[、，,；;]|\b(?:and|then)\b|并且|然后|以及/.test(payload.text)
 
-  if (isSingleClearRecord) return deterministicRecords
+  if (isSingleClearRecord || isSingleFlightPlan) return deterministicRecords
 
   try {
     const data = await requestDeepSeek({
@@ -766,6 +807,40 @@ app.use((error, req, res, next) => {
 
 app.use(express.json({ limit: '1mb' }))
 
+function resolveRecordReferencePayload(payload) {
+  const referencedText = getReferencedRecordText(payload.text, payload.messages)
+  if (!referencedText) return payload
+
+  const category = getDeterministicExtraction(referencedText, payload.category).records[0]?.category
+    ?? payload.category
+
+  return {
+    ...payload,
+    text: referencedText,
+    category,
+    intent: 'record',
+    recordingFollowUp: true,
+  }
+}
+
+function normalizeRecordComparisonText(text) {
+  return typeof text === 'string'
+    ? text.toLowerCase().replace(/[\s，。！？、,.!?：:；;（）()]/g, '')
+    : ''
+}
+
+function filterAlreadySavedFollowUpRecords(records, payload) {
+  if (!payload.recordingFollowUp || !Array.isArray(payload.todayRecords)) return records
+
+  const existingKeys = new Set(payload.todayRecords.map((record) => (
+    `${record?.category}:${normalizeRecordComparisonText(record?.text)}`
+  )))
+
+  return records.filter((record) => (
+    !existingKeys.has(`${record.category}:${normalizeRecordComparisonText(record.text)}`)
+  ))
+}
+
 app.post('/api/chat', async (req, res) => {
   try {
     const payload = req.body ?? {}
@@ -790,18 +865,20 @@ app.post('/api/chat', async (req, res) => {
       return
     }
 
+    const effectivePayload = resolveRecordReferencePayload(requestPayload)
     const [chatResult, extractionResult] = await Promise.allSettled([
-      runChatOperation('chat', () => generateChatReply(requestPayload)),
-      runChatOperation('extraction', () => extractRecords(requestPayload)),
+      runChatOperation('chat', () => generateChatReply(effectivePayload)),
+      runChatOperation('extraction', () => extractRecords(effectivePayload)),
     ])
     const chatSucceeded = chatResult.status === 'fulfilled'
     const rawReply = chatSucceeded
       ? chatResult.value
-      : typeof requestPayload.fallbackReply === 'string' && requestPayload.fallbackReply.trim()
-        ? requestPayload.fallbackReply.trim()
+      : typeof effectivePayload.fallbackReply === 'string' && effectivePayload.fallbackReply.trim()
+        ? effectivePayload.fallbackReply.trim()
         : '我在。先帮你把这句话接住，等会儿我们再慢慢整理。'
-    const reply = applyReplySafeguard(requestPayload, rawReply)
-    const records = extractionResult.status === 'fulfilled' ? extractionResult.value : []
+    const reply = applyReplySafeguard(effectivePayload, rawReply)
+    const extractedRecords = extractionResult.status === 'fulfilled' ? extractionResult.value : []
+    const records = filterAlreadySavedFollowUpRecords(extractedRecords, effectivePayload)
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('[LifePilot] chat request completed', {

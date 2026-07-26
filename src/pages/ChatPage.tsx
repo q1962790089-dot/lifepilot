@@ -232,10 +232,15 @@ function createFallbackReply(
 
   if (intent === 'record' && categories.length === 1) {
     if (firstCategory === 'todo' && /(飞机|航班)/.test(text)) {
-      const spokenTime = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?/)?.[0]
-        ?.replace('点钟', '点')
-        .trim()
-      return `好，${spokenTime ? `${spokenTime}要` : ''}赶飞机。路上多留点余量，别把自己卡得太紧。`
+      const times = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})/g)
+        ?.map((value) => value
+          .replace(/\s+/g, '')
+          .replace(/[：:](?:00)?$/, '点')
+          .replace('点钟', '点')) ?? []
+      if (/出发/.test(text) && times.length > 1) {
+        return `好，${times[0]}出发赶${times[times.length - 1]}的飞机。路上多留点余量，别把自己卡得太紧。`
+      }
+      return `好，${times[0] ? `${times[0]}要` : ''}赶飞机。路上多留点余量，别把自己卡得太紧。`
     }
     if (firstCategory === 'todo') return '好，按这个安排来。到点前给自己留一点余量。'
     if (firstCategory === 'expense') return '这笔我看到了，之后回看账目时会更清楚。'
