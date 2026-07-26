@@ -74,3 +74,35 @@ test('splits plans when a later date starts a new schedule without a connector',
     },
   )
 })
+
+test('keeps destination context when splitting a conditional travel plan', () => {
+  assert.deepEqual(
+    getDeterministicExtraction('我今天晚上如果过不去去东莞我就要住酒店但是我明天早上就得早点去因为明天早上9:00还有课', 'todo'),
+    {
+      records: [
+        {
+          category: 'todo',
+          text: '如果去不了东莞，就住酒店',
+          sourceText: '我今天晚上如果过不去去东莞我就要住酒店',
+        },
+        {
+          category: 'todo',
+          text: '早点去东莞',
+          sourceText: '明天早上就得早点去',
+        },
+        {
+          category: 'todo',
+          text: '上课',
+          sourceText: '明天早上9:00还有课',
+        },
+      ],
+    },
+  )
+})
+
+test('does not save an unfinished spoken clause as a todo', () => {
+  assert.deepEqual(
+    getDeterministicExtraction('呃我今天晚上会住酒店然后 因为', 'todo'),
+    { records: [] },
+  )
+})

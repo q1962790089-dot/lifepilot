@@ -33,7 +33,9 @@ function cleanTodoText(text) {
   result = result.replace(new RegExp(`^(?:${RELATIVE_DATE_PATTERN.source}|晚点|待会儿?|一会儿?|等下)\\s*`), '')
   result = result.replace(/^(?:凌晨|早上|上午|中午|下午|晚上|傍晚)\s*/, '')
   result = result.replace(/^(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})\s*/, '')
-  result = result.replace(/^(?:(?:还|也|可能)\s*)?(?:要|需要|得|准备|打算|计划|会)\s*/, '')
+  result = result.replace(/^(?:就)?(?:(?:还|也|可能)\s*)?(?:要|需要|得|准备|打算|计划|会)\s*/, '')
+  const conditionalHotel = result.match(/^如果.*去+([\u4e00-\u9fff]{2,8})我就(?:要)?住酒店/)
+  if (conditionalHotel) return `如果去不了${conditionalHotel[1]}，就住酒店`
   result = result.replace(/^定(?:个)?酒店/, '订酒店')
   result = result.replace(/^住酒店/, '入住酒店')
   result = result.replace(/有可能/g, '，可能')
@@ -51,7 +53,7 @@ function splitOnDateChanges(fragment) {
   for (const match of matches.slice(1)) {
     const matchIndex = match.index ?? 0
     const beforeDate = fragment.slice(start, matchIndex)
-    const connector = beforeDate.match(/(?:因为|所以|然后)?我?\s*$/)?.[0] ?? ''
+    const connector = beforeDate.match(/(?:因为|所以|然后|但是|不过|但)?我?\s*$/)?.[0] ?? ''
     const end = matchIndex - connector.length
     const part = fragment.slice(start, end).trim()
     if (part) parts.push(part)
@@ -77,6 +79,7 @@ function getIndependentTodoRecords(text) {
   if (fragments.length < 2) return []
 
   let inheritedDate = ''
+  const sharedDestination = text.match(/去+([\u4e00-\u9fff]{2,8}?)(?=我就|因为|但是|不过|但|$)/)?.[1]
   const records = []
 
   for (const fragment of fragments) {
@@ -90,9 +93,14 @@ function getIndependentTodoRecords(text) {
     if (!hasAction || !hasPlanSignal) continue
 
     const sourceText = !dateMatch && inheritedDate ? `${inheritedDate}${fragment}` : fragment
+    let todoText = cleanTodoText(fragment)
+    if (sharedDestination && /^(?:早点|尽早)去$/.test(todoText)) {
+      todoText += sharedDestination
+    }
+
     records.push({
       category: 'todo',
-      text: cleanTodoText(fragment),
+      text: todoText,
       sourceText,
     })
   }
@@ -122,6 +130,9 @@ export function getDeterministicExtraction(text, suggestedCategory) {
 
   const normalized = text.trim()
   const lower = normalized.toLowerCase()
+  if (/(?:然后|但是|不过|因为|所以|如果|要是)\s*$/.test(normalized)) {
+    return { records: [] }
+  }
   const independentTodos = getIndependentTodoRecords(normalized)
 
   if (independentTodos.length > 1) {

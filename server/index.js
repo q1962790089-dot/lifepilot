@@ -398,7 +398,7 @@ function formatSpokenClock(value) {
     .replace('点钟', '点')
 }
 
-function createNaturalRecordReply(text, inferredCategory, isRecordingFollowUp = false) {
+function createNaturalRecordReply(text, inferredCategory, isRecordingFollowUp = false, needsAlternative = false) {
   if (inferredCategory === 'todo' && /(飞机|航班)/.test(text)) {
     const times = text.match(/(?:凌晨|早上|上午|中午|下午|晚上|傍晚)?\s*(?:(?:十二|十一|十|[零一二两三四五六七八九]|\d{1,2})点(?:钟|半)?|\d{1,2}\s*[:：]\s*\d{2})/g)
       ?.map(formatSpokenClock) ?? []
@@ -413,6 +413,10 @@ function createNaturalRecordReply(text, inferredCategory, isRecordingFollowUp = 
     }
     return `好，${times[0] ? `${times[0]}要` : ''}赶飞机。路上多留点余量，别把自己卡得太紧。`
   }
+  if (inferredCategory === 'todo' && needsAlternative && /(酒店|东莞).*(上课|有课)|(上课|有课).*(酒店|东莞)/.test(text)) {
+    return '明白。今晚先看能不能到东莞，赶不过去就住酒店；明早 9 点还有课，早点出发。'
+  }
+  if (inferredCategory === 'todo' && needsAlternative) return '行，这几项分开安排，时间各按你说的来。'
   if (inferredCategory === 'todo') return '好，按这个安排来。到点前给自己留一点余量。'
   if (inferredCategory === 'expense') return '这笔我看到了，之后回看账目时会更清楚。'
   if (inferredCategory === 'weight') return '好，先看后面的连续趋势，不急着评价这一次。'
@@ -447,7 +451,12 @@ function applyReplySafeguard(payload, reply) {
       || (payload.recordingFollowUp && isGenericListeningReply)
     )
   ) {
-    return createNaturalRecordReply(text, inferredCategory, payload.recordingFollowUp)
+    return createNaturalRecordReply(
+      text,
+      inferredCategory,
+      payload.recordingFollowUp,
+      repeatsRecentAiReply,
+    )
   }
 
   if (isSolution && startsByAskingForContext) {
