@@ -1,10 +1,20 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageCircle, SendHorizontal, Sparkles } from 'lucide-react'
+import { MessageCircle, Mic, SendHorizontal, Sparkles, Square } from 'lucide-react'
 import { recognize } from '../utils/recognize'
 import { getAddressText, loadPreferences } from '../utils/preferences'
 import { addRecord, getTodayRecords, loadRecords } from '../utils/storage'
 import { createMessageTimeContext } from '../utils/messageTimeContext'
 import type { MessageTimeContext } from '../utils/messageTimeContext'
+import {
+  isBrowserSpeechSupported,
+  loadVoiceConfig,
+  startVoiceTranscription,
+} from '../utils/voiceTranscription'
+import type {
+  VoiceConfig,
+  VoiceSession,
+  VoiceState,
+} from '../utils/voiceTranscription'
 import type { LifePilotPreferences } from '../types/preferences'
 import type { Category, LifeRecord } from '../types/record'
 
@@ -373,14 +383,32 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
   const [messages, setMessages] = useState<Message[]>(loadMessages)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [voiceConfig, setVoiceConfig] = useState<VoiceConfig | null>(null)
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle')
+  const [voiceError, setVoiceError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const voiceSessionRef = useRef<VoiceSession | null>(null)
+
+  useEffect(() => {
+    let active = true
+    loadVoiceConfig().then((config) => {
+      if (active) setVoiceConfig(config)
+    })
+
+    return () => {
+      active = false
+      voiceSessionRef.current?.cancel()
+      voiceSessionRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
-  const sendMessage = async () => {
-    const text = input.trim()
+  const sendMessage = async (textOverride?: string) => {
+    const usesTypedInput = textOverride === undefined
+    const text = (textOverride ?? input).trim()
     if (!text || sending) return
 
     const messageTimeContext = createMessageTimeContext()
@@ -400,7 +428,7 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
     const withoutAi = [...messages, userMsg]
     setMessages(withoutAi)
     saveMessages(withoutAi)
-    setInput('')
+    if (usesTypedInput) setInput('')
     setSending(true)
 
     const fallbackReply = createFallbackReply(text, intent, replyCategories, now.getTime(), preferences)
@@ -444,10 +472,51 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
     setSending(false)
   }
 
+  const handleVoiceInput = async () => {
+    if (sending || !voiceConfig) return
+
+    if (voiceState === 'listening') {
+      setVoiceState('transcribing')
+      voiceSessionRef.current?.stop()
+      return
+    }
+
+    if (voiceState === 'transcribing') return
+
+    setVoiceError(null)
+    if (voiceConfig.provider === 'browser' && !isBrowserSpeechSupported()) {
+      setVoiceError('当前浏览器暂不支持语音识别，请使用文字输入。')
+      return
+    }
+
+    setVoiceState('transcribing')
+    try {
+      voiceSessionRef.current = await startVoiceTranscription(voiceConfig, {
+        onListening: () => setVoiceState('listening'),
+        onProcessing: () => setVoiceState('transcribing'),
+        onTranscript: (text) => {
+          voiceSessionRef.current = null
+          setVoiceState('idle')
+          setVoiceError(null)
+          void sendMessage(text)
+        },
+        onError: (message) => {
+          voiceSessionRef.current = null
+          setVoiceState('idle')
+          setVoiceError(message)
+        },
+      })
+    } catch (error) {
+      voiceSessionRef.current = null
+      setVoiceState('idle')
+      setVoiceError(error instanceof Error ? error.message : '语音输入失败，请使用文字输入。')
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && voiceState === 'idle') {
       e.preventDefault()
-      sendMessage()
+      void sendMessage()
     }
   }
 
@@ -523,18 +592,42 @@ function ChatPage({ preferences }: { preferences: LifePilotPreferences }) {
       </div>
 
       <div className="shrink-0 px-4 pb-7 pt-2">
+        {(voiceState !== 'idle' || voiceError) && (
+          <p
+            className={`mb-2 truncate px-3 text-xs ${voiceError ? 'text-red-500' : 'text-gray-400'}`}
+            role={voiceError ? 'alert' : 'status'}
+          >
+            {voiceError ?? (voiceState === 'listening' ? '正在聆听，点击停止后自动发送' : '正在转写…')}
+          </p>
+        )}
         <div className="flex items-center gap-2 rounded-full bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            disabled={voiceState !== 'idle'}
             placeholder="输入消息..."
-            className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400"
+            className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400 disabled:opacity-50"
           />
           <button
-            onClick={sendMessage}
-            disabled={!input.trim() || sending}
+            type="button"
+            onClick={() => void handleVoiceInput()}
+            disabled={sending || voiceState === 'transcribing' || !voiceConfig}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-25 ${
+              voiceState === 'listening'
+                ? 'animate-pulse bg-gray-950 text-white'
+                : 'bg-gray-100 text-gray-600'
+            }`}
+            aria-label={voiceState === 'listening' ? '停止语音输入' : voiceState === 'transcribing' ? '正在转写语音' : '开始语音输入'}
+          >
+            {voiceState === 'listening'
+              ? <Square size={15} fill="currentColor" strokeWidth={1.8} />
+              : <Mic size={18} strokeWidth={2} />}
+          </button>
+          <button
+            onClick={() => void sendMessage()}
+            disabled={!input.trim() || sending || voiceState !== 'idle'}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-950 text-white shadow-sm transition-opacity disabled:cursor-not-allowed disabled:opacity-25"
             aria-label="发送消息"
           >

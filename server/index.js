@@ -11,6 +11,13 @@ import {
   parseExplicitTime,
   resolveRelativeDate,
 } from './messageTime.js'
+import {
+  createMemoryRateLimiter,
+  getPublicVoiceConfig,
+  getVoiceRuntimeConfig,
+  normalizeAudioContentType,
+  requestCompatibleTranscription,
+} from './voiceTranscription.js'
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787)
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions'
@@ -18,6 +25,8 @@ const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const distPath = path.resolve(__dirname, '../dist')
+const voiceConfig = getVoiceRuntimeConfig()
+const voiceRateLimiter = createMemoryRateLimiter()
 
 function compactRecords(records) {
   if (!Array.isArray(records)) return []
@@ -607,6 +616,69 @@ async function askDeepSeekSummary(payload) {
 }
 
 const app = express()
+
+app.set('trust proxy', 1)
+
+app.get('/api/voice-config', (_req, res) => {
+  res.status(200).json(getPublicVoiceConfig(voiceConfig))
+})
+
+app.post(
+  '/api/transcriptions',
+  (req, res, next) => {
+    if (voiceConfig.provider !== 'api' || !voiceConfig.apiConfigured) {
+      res.status(503).json({ error: 'Voice transcription is not configured' })
+      return
+    }
+
+    const rateLimit = voiceRateLimiter.check(req.ip)
+    if (!rateLimit.allowed) {
+      res.set('Retry-After', String(rateLimit.retryAfterSeconds))
+      res.status(429).json({ error: 'Too many transcription requests' })
+      return
+    }
+
+    const contentType = normalizeAudioContentType(req.get('content-type'))
+    if (!contentType) {
+      res.status(415).json({ error: 'Unsupported audio type' })
+      return
+    }
+
+    res.locals.audioContentType = contentType
+    next()
+  },
+  express.raw({ type: () => true, limit: voiceConfig.maxAudioBytes }),
+  async (req, res) => {
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      res.status(400).json({ error: 'Empty audio' })
+      return
+    }
+
+    try {
+      const text = await requestCompatibleTranscription({
+        audio: req.body,
+        contentType: res.locals.audioContentType,
+        fileName: req.get('x-audio-filename'),
+        config: voiceConfig,
+      })
+      res.status(200).json({ text })
+    } catch (error) {
+      const isTimeout = error instanceof Error && error.name === 'AbortError'
+      console.warn('[LifePilot] voice transcription failed', {
+        reason: isTimeout ? 'timeout' : 'upstream_error',
+      })
+      res.status(isTimeout ? 504 : 502).json({ error: isTimeout ? 'Transcription timed out' : 'Transcription failed' })
+    }
+  },
+)
+
+app.use((error, req, res, next) => {
+  if (req.path === '/api/transcriptions' && error?.type === 'entity.too.large') {
+    res.status(413).json({ error: 'Audio is too large' })
+    return
+  }
+  next(error)
+})
 
 app.use(express.json({ limit: '1mb' }))
 

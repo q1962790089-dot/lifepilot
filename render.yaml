@@ -13,3 +13,5 @@ services:
         value: deepseek-chat
       - key: DEEPSEEK_API_KEY
         sync: false
+      - key: VOICE_TRANSCRIPTION_PROVIDER
+        value: browser
