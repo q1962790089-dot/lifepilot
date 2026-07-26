@@ -269,6 +269,9 @@ function getWechatStartRecordError(response: WechatSdkResponse) {
     .replace(/^[\s,:;._-]+|[\s,:;._-]+$/g, '')
 
   if (isIosWechat && !reason) return null
+  if (/require subscribe/.test(reason)) {
+    return '请先关注当前微信测试公众号，关注后重新打开 LifePilot。'
+  }
   if (/not support|unsupported|isn't supported|current webview/.test(reason)) {
     return '当前微信打开方式不支持网页录音，请退出浮窗后从公众号消息中打开。'
   }
